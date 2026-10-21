@@ -1,0 +1,9 @@
+{
+  "image_type": "sst",
+  "source": "JMA",
+  "title": "JMA Sea Surface Temperature Western North Pacific 2026-10-20",
+  "image_url": "https://www.data.jma.go.jp/goos/data/pub/JMA-product/IMAGE/him_sst_pac_D/2026/him_sst_pac_D20261020.gif?fetched=20261021T113725Z",
+  "source_url": "https://www.data.jma.go.jp/goos/data/rrtdb/jma-pro/him_sst_pac_D.html",
+  "fetched_at": "2026-10-21T11:37:25.369936+00:00",
+  "image_time": "2026-10-20"
+}
