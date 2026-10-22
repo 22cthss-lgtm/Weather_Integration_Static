@@ -75,6 +75,31 @@ class CWAService(BaseImageService):
         except requests.RequestException:
             return False
 
+    def check_image_url(self, image_url: str) -> bool:
+        """Distinguish absent slots (404/410) from transient source failures."""
+        try:
+            with requests.get(image_url, timeout=15, stream=True,
+                              headers=self.no_cache_headers(), verify=False) as response:
+                if response.status_code in (404, 410):
+                    return False
+                response.raise_for_status()
+                if not (response.headers.get('Content-Type') or '').lower().startswith('image/'):
+                    raise RuntimeError('CWA URL did not return an image')
+                if not next(response.iter_content(chunk_size=1), b''):
+                    raise RuntimeError('CWA image response was empty')
+                return True
+        except requests.RequestException:
+            raise RuntimeError('CWA image request failed') from None
+
+    def fetch_rainfall_day_script(self) -> str:
+        try:
+            with requests.get(f'{self.cwa_base_url}/Data/js/rainfall/RainfallImg_Day.js',
+                              timeout=20, headers=self.no_cache_headers(), verify=False) as response:
+                response.raise_for_status()
+                return response.text
+        except requests.RequestException:
+            raise RuntimeError('CWA daily rainfall index request failed') from None
+
     def resolve_latest_image(
         self,
         *,
@@ -121,6 +146,9 @@ class CWAService(BaseImageService):
             f"CWA Color Satellite Cloud {display_time}",
             image_url,
             self.satellite_source_url,
+            image_time=datetime.strptime(display_time, "%Y-%m-%d %H:%M").replace(
+                tzinfo=self.satellite_timezone
+            ).isoformat(),
         )
 
     def build_satellite_image_url(self, image_time: datetime) -> str:
@@ -197,6 +225,9 @@ class CWAService(BaseImageService):
             f"CWA Radar Echo {display_time}",
             image_url,
             self.radar_source_url,
+            image_time=datetime.strptime(display_time, "%Y-%m-%d %H:%M").replace(
+                tzinfo=self.satellite_timezone
+            ).isoformat(),
         )
 
     def build_radar_image_url(self, image_time: datetime) -> str:
@@ -339,7 +370,9 @@ class CWAService(BaseImageService):
             f"CWA Accumulated Rainfall {display_time}",
             image_url,
             self.rainfall_source_url,
-            image_time=display_time,
+            image_time=datetime.strptime(display_time, "%Y-%m-%d %H:%M").replace(
+                tzinfo=self.satellite_timezone
+            ).isoformat(),
         )
 
     def resolve_direct_weather_chart_image_url(self) -> tuple[str, str | None] | None:

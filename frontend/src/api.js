@@ -2,7 +2,26 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5174
 const STATIC_IMAGE_TYPES = new Set([
   "sst", "temperature", "weather_chart", "850hpa", "tchp",
   "cimss_wind_analysis", "cimss_steering_flow", "seaice_arctic", "seaice_antarctic",
+  "radar", "satellite", "rainfall",
 ]);
+const CURRENT_IMAGE_TYPES = new Set(["radar", "satellite", "rainfall"]);
+
+async function readStatic(path) {
+  const response = await fetch(`${import.meta.env.BASE_URL}${path}`, { cache: "no-cache" });
+  if (!response.ok) throw new Error(`無法讀取已發布資料：${path}`);
+  return response.json();
+}
+
+export async function fetchCurrentImageHistory(type, date) {
+  if (!CURRENT_IMAGE_TYPES.has(type) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error("Invalid current-day image request");
+  }
+  const data = await readStatic(`data/images/${type}/history/${date}.json`);
+  if (data.image_type !== type || data.date !== date || !Array.isArray(data.items)) {
+    throw new Error("Invalid published image history");
+  }
+  return data;
+}
 
 export async function fetchLatestImage(type) {
   if (STATIC_IMAGE_TYPES.has(type)) {
@@ -22,6 +41,10 @@ export async function fetchLatestImage(type) {
 }
 
 export async function fetchImageHistory(type, { date = "", limit = "" } = {}) {
+  if (CURRENT_IMAGE_TYPES.has(type)) {
+    const data = await fetchCurrentImageHistory(type, date);
+    return limit ? data.items.slice(-Number(limit)) : data.items;
+  }
   const params = new URLSearchParams({ type });
   if (date) {
     params.set("date", date);
@@ -53,6 +76,11 @@ export async function backfillImages(type, { range = "today", date = "" } = {}) 
 }
 
 export async function fetchDailyImages(type, { date = "" } = {}) {
+  if (type === "rainfall") {
+    const data = await readStatic("data/images/rainfall/daily/latest.json");
+    if (!Array.isArray(data.items) || data.items.length !== 3) throw new Error("Invalid daily rainfall images");
+    return data.items;
+  }
   const params = new URLSearchParams({ type });
   if (date) {
     params.set("date", date);
@@ -63,9 +91,10 @@ export async function fetchDailyImages(type, { date = "" } = {}) {
 }
 
 export async function fetchRainfallTop(metric = "10min") {
-  const params = new URLSearchParams({ metric });
-  const response = await fetch(`${API_BASE_URL}/api/rainfall/top?${params.toString()}`);
-  return parseJson(response, `Failed to fetch rainfall top ranking for ${metric}`);
+  const data = await readStatic("data/rainfall/rankings/latest.json");
+  const ranking = data.rankings?.[metric];
+  if (!ranking || !Array.isArray(ranking.items)) throw new Error(`無法讀取雨量排行：${metric}`);
+  return ranking;
 }
 
 export async function fetchImageStatus() {

@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-22",
+  "timezone": "Asia/Taipei",
+  "fetched_at": "2026-10-22T11:28:09.167088+00:00",
+  "items": [
+    {
+      "image_type": "rainfall",
+      "source": "CWA",
+      "title": "CWA 今日單日累積雨量",
+      "image_url": "https://www.cwa.gov.tw/Data/rainfall/2026-10-22_1900.QZJ8.jpg",
+      "source_url": "https://www.cwa.gov.tw/V8/C/P/Rainfall/Rainfall_QZJ.html",
+      "fetched_at": "2026-10-22T11:28:08.790421+00:00",
+      "image_time": "2026-10-22T19:00:00+08:00",
+      "label": "今日",
+      "represented_date": "2026-10-22",
+      "accumulation_start": "2026-10-22T00:00:00+08:00",
+      "accumulation_end": "2026-10-22T19:00:00+08:00"
+    },
+    {
+      "image_type": "rainfall",
+      "source": "CWA",
+      "title": "CWA 昨日單日累積雨量",
+      "image_url": "https://www.cwa.gov.tw/Data/rainfall/2026-10-22_0000.QZJ8.jpg",
+      "source_url": "https://www.cwa.gov.tw/V8/C/P/Rainfall/Rainfall_QZJ.html",
+      "fetched_at": "2026-10-22T11:28:08.969174+00:00",
+      "image_time": "2026-10-22T00:00:00+08:00",
+      "label": "昨日",
+      "represented_date": "2026-10-21",
+      "accumulation_start": "2026-10-21T00:00:00+08:00",
+      "accumulation_end": "2026-10-22T00:00:00+08:00"
+    },
+    {
+      "image_type": "rainfall",
+      "source": "CWA",
+      "title": "CWA 前日單日累積雨量",
+      "image_url": "https://www.cwa.gov.tw/Data/rainfall/2026-10-21_0000.QZJ8.jpg",
+      "source_url": "https://www.cwa.gov.tw/V8/C/P/Rainfall/Rainfall_QZJ.html",
+      "fetched_at": "2026-10-22T11:28:09.166997+00:00",
+      "image_time": "2026-10-21T00:00:00+08:00",
+      "label": "前日",
+      "represented_date": "2026-10-20",
+      "accumulation_start": "2026-10-20T00:00:00+08:00",
+      "accumulation_end": "2026-10-21T00:00:00+08:00"
+    }
+  ]
+}

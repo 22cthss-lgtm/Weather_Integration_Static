@@ -1,0 +1,1058 @@
+{
+  "image_type": "radar",
+  "date": "2026-10-22",
+  "timezone": "Asia/Taipei",
+  "updated_at": "2026-10-22T11:27:55.560914+00:00",
+  "range_start": "2026-10-22T00:00:00+08:00",
+  "range_end": "2026-10-22T19:10:00+08:00",
+  "expected_count": 116,
+  "complete": true,
+  "missing": [],
+  "failed": [],
+  "items": [
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 00:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220000.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:02.878262+00:00",
+      "image_time": "2026-10-22T00:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 00:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220010.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:02.875857+00:00",
+      "image_time": "2026-10-22T00:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 00:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220020.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:02.896190+00:00",
+      "image_time": "2026-10-22T00:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 00:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220030.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:02.900899+00:00",
+      "image_time": "2026-10-22T00:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 00:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220040.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:02.917107+00:00",
+      "image_time": "2026-10-22T00:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 00:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220050.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:02.919742+00:00",
+      "image_time": "2026-10-22T00:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 01:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220100.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.504561+00:00",
+      "image_time": "2026-10-22T01:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 01:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220110.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.505584+00:00",
+      "image_time": "2026-10-22T01:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 01:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220120.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.366389+00:00",
+      "image_time": "2026-10-22T01:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 01:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220130.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.474204+00:00",
+      "image_time": "2026-10-22T01:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 01:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220140.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.381650+00:00",
+      "image_time": "2026-10-22T01:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 01:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220150.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.383965+00:00",
+      "image_time": "2026-10-22T01:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 02:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220200.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.741395+00:00",
+      "image_time": "2026-10-22T02:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 02:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220210.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.714344+00:00",
+      "image_time": "2026-10-22T02:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 02:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220220.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.705565+00:00",
+      "image_time": "2026-10-22T02:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 02:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220230.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.970483+00:00",
+      "image_time": "2026-10-22T02:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 02:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220240.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.876312+00:00",
+      "image_time": "2026-10-22T02:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 02:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220250.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:03.877212+00:00",
+      "image_time": "2026-10-22T02:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 03:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220300.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.085292+00:00",
+      "image_time": "2026-10-22T03:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 03:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220310.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.084039+00:00",
+      "image_time": "2026-10-22T03:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 03:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220320.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.086449+00:00",
+      "image_time": "2026-10-22T03:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 03:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220330.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.278309+00:00",
+      "image_time": "2026-10-22T03:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 03:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220340.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.268747+00:00",
+      "image_time": "2026-10-22T03:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 03:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220350.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.399581+00:00",
+      "image_time": "2026-10-22T03:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 04:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220400.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.539475+00:00",
+      "image_time": "2026-10-22T04:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 04:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220410.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.425660+00:00",
+      "image_time": "2026-10-22T04:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 04:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220420.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.419616+00:00",
+      "image_time": "2026-10-22T04:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 04:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220430.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.540670+00:00",
+      "image_time": "2026-10-22T04:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 04:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220440.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.615582+00:00",
+      "image_time": "2026-10-22T04:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 04:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220450.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.759497+00:00",
+      "image_time": "2026-10-22T04:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 05:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220500.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.845234+00:00",
+      "image_time": "2026-10-22T05:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 05:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220510.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:04.733233+00:00",
+      "image_time": "2026-10-22T05:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 05:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220520.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.031722+00:00",
+      "image_time": "2026-10-22T05:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 05:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220530.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.018548+00:00",
+      "image_time": "2026-10-22T05:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 05:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220540.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.010146+00:00",
+      "image_time": "2026-10-22T05:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 05:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220550.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.155365+00:00",
+      "image_time": "2026-10-22T05:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 06:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220600.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.183972+00:00",
+      "image_time": "2026-10-22T06:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 06:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220610.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.332850+00:00",
+      "image_time": "2026-10-22T06:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 06:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220620.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.449174+00:00",
+      "image_time": "2026-10-22T06:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 06:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220630.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.513356+00:00",
+      "image_time": "2026-10-22T06:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 06:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220640.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.466344+00:00",
+      "image_time": "2026-10-22T06:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 06:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220650.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.784749+00:00",
+      "image_time": "2026-10-22T06:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 07:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220700.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.800282+00:00",
+      "image_time": "2026-10-22T07:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 07:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220710.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.683181+00:00",
+      "image_time": "2026-10-22T07:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 07:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220720.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.898767+00:00",
+      "image_time": "2026-10-22T07:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 07:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220730.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:05.903047+00:00",
+      "image_time": "2026-10-22T07:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 07:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220740.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.060766+00:00",
+      "image_time": "2026-10-22T07:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 07:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220750.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.294376+00:00",
+      "image_time": "2026-10-22T07:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 08:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220800.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.292738+00:00",
+      "image_time": "2026-10-22T08:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 08:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220810.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.434572+00:00",
+      "image_time": "2026-10-22T08:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 08:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220820.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.431835+00:00",
+      "image_time": "2026-10-22T08:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 08:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220830.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.453285+00:00",
+      "image_time": "2026-10-22T08:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 08:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220840.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.430932+00:00",
+      "image_time": "2026-10-22T08:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 08:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220850.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.673399+00:00",
+      "image_time": "2026-10-22T08:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 09:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220900.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.653972+00:00",
+      "image_time": "2026-10-22T09:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 09:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220910.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.998033+00:00",
+      "image_time": "2026-10-22T09:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 09:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220920.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.849902+00:00",
+      "image_time": "2026-10-22T09:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 09:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220930.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.978802+00:00",
+      "image_time": "2026-10-22T09:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 09:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220940.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:06.848176+00:00",
+      "image_time": "2026-10-22T09:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 09:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610220950.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:07.168530+00:00",
+      "image_time": "2026-10-22T09:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 10:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221000.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:07.163561+00:00",
+      "image_time": "2026-10-22T10:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 10:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221010.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:07.462791+00:00",
+      "image_time": "2026-10-22T10:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 10:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221020.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:07.458535+00:00",
+      "image_time": "2026-10-22T10:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 10:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221030.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:07.482804+00:00",
+      "image_time": "2026-10-22T10:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 10:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221040.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:07.478073+00:00",
+      "image_time": "2026-10-22T10:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 10:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221050.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:07.678760+00:00",
+      "image_time": "2026-10-22T10:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 11:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221100.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:07.668116+00:00",
+      "image_time": "2026-10-22T11:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 11:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221110.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.041521+00:00",
+      "image_time": "2026-10-22T11:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 11:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221120.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.142351+00:00",
+      "image_time": "2026-10-22T11:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 11:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221130.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.084077+00:00",
+      "image_time": "2026-10-22T11:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 11:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221140.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.061865+00:00",
+      "image_time": "2026-10-22T11:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 11:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221150.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.127404+00:00",
+      "image_time": "2026-10-22T11:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 12:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221200.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.033488+00:00",
+      "image_time": "2026-10-22T12:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 12:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221210.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.903808+00:00",
+      "image_time": "2026-10-22T12:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 12:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221220.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.910378+00:00",
+      "image_time": "2026-10-22T12:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 12:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221230.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.890003+00:00",
+      "image_time": "2026-10-22T12:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 12:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221240.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.902242+00:00",
+      "image_time": "2026-10-22T12:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 12:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221250.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.925697+00:00",
+      "image_time": "2026-10-22T12:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 13:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221300.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:08.894624+00:00",
+      "image_time": "2026-10-22T13:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 13:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221310.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:09.588707+00:00",
+      "image_time": "2026-10-22T13:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 13:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221320.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:09.581472+00:00",
+      "image_time": "2026-10-22T13:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 13:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221330.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:09.586072+00:00",
+      "image_time": "2026-10-22T13:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 13:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221340.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:09.494065+00:00",
+      "image_time": "2026-10-22T13:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 13:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221350.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:09.591232+00:00",
+      "image_time": "2026-10-22T13:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 14:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221400.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:09.585017+00:00",
+      "image_time": "2026-10-22T14:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 14:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221410.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:09.807727+00:00",
+      "image_time": "2026-10-22T14:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 14:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221420.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.019295+00:00",
+      "image_time": "2026-10-22T14:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 14:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221430.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.235757+00:00",
+      "image_time": "2026-10-22T14:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 14:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221440.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.017810+00:00",
+      "image_time": "2026-10-22T14:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 14:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221450.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.135500+00:00",
+      "image_time": "2026-10-22T14:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 15:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221500.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.020704+00:00",
+      "image_time": "2026-10-22T15:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 15:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221510.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.253348+00:00",
+      "image_time": "2026-10-22T15:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 15:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221520.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.523575+00:00",
+      "image_time": "2026-10-22T15:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 15:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221530.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.520933+00:00",
+      "image_time": "2026-10-22T15:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 15:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221540.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.447065+00:00",
+      "image_time": "2026-10-22T15:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 15:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221550.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.603627+00:00",
+      "image_time": "2026-10-22T15:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 16:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221600.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.723582+00:00",
+      "image_time": "2026-10-22T16:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 16:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221610.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.720645+00:00",
+      "image_time": "2026-10-22T16:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 16:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221620.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:10.813244+00:00",
+      "image_time": "2026-10-22T16:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 16:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221630.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.056996+00:00",
+      "image_time": "2026-10-22T16:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 16:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221640.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.138489+00:00",
+      "image_time": "2026-10-22T16:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 16:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221650.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.230126+00:00",
+      "image_time": "2026-10-22T16:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 17:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221700.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.232485+00:00",
+      "image_time": "2026-10-22T17:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 17:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221710.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.193547+00:00",
+      "image_time": "2026-10-22T17:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 17:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221720.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.450718+00:00",
+      "image_time": "2026-10-22T17:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 17:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221730.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.371009+00:00",
+      "image_time": "2026-10-22T17:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 17:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221740.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.447716+00:00",
+      "image_time": "2026-10-22T17:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 17:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221750.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.852590+00:00",
+      "image_time": "2026-10-22T17:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 18:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221800.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.857518+00:00",
+      "image_time": "2026-10-22T18:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 18:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221810.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.829267+00:00",
+      "image_time": "2026-10-22T18:10:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 18:20",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221820.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:12.028621+00:00",
+      "image_time": "2026-10-22T18:20:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 18:30",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221830.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.974648+00:00",
+      "image_time": "2026-10-22T18:30:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 18:40",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221840.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:11.973314+00:00",
+      "image_time": "2026-10-22T18:40:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 18:50",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221850.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:12.189423+00:00",
+      "image_time": "2026-10-22T18:50:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 19:00",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221900.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:12.190659+00:00",
+      "image_time": "2026-10-22T19:00:00+08:00"
+    },
+    {
+      "image_type": "radar",
+      "source": "CWA",
+      "title": "CWA Radar 2026-10-22 19:10",
+      "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221910.png",
+      "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
+      "fetched_at": "2026-10-22T11:21:12.197311+00:00",
+      "image_time": "2026-10-22T19:10:00+08:00"
+    }
+  ]
+}

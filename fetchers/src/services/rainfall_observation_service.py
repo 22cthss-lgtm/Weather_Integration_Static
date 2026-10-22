@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
 import os
+import math
 from typing import Any
 
 import requests
 import urllib3
 
-from ..models.rainfall_observation_repository import upsert_rainfall_observations
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -24,7 +24,8 @@ def parse_rainfall_number(value: Any) -> float | None:
         if value in SPECIAL_RAINFALL_VALUES:
             return None
     try:
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
 
@@ -110,19 +111,21 @@ class RainfallObservationService:
             )
             response.raise_for_status()
         except requests.RequestException as exc:
-            raise RuntimeError("CWA rainfall API request failed.") from exc
+            raise RuntimeError("CWA rainfall API request failed.") from None
 
         try:
             payload = response.json()
         except ValueError as exc:
-            raise RuntimeError("CWA rainfall API response was not valid JSON.") from exc
+            raise RuntimeError("CWA rainfall API response was not valid JSON.") from None
 
         try:
             return parse_cwa_rainfall_response(payload, fetched_at=fetched_at)
         except ValueError as exc:
-            raise RuntimeError(str(exc)) from exc
+            raise RuntimeError("Unexpected CWA rainfall response format.") from None
 
     def refresh_observations(self) -> int:
+        # Legacy database entry point, never imported by the static pipeline.
+        from ..models.rainfall_observation_repository import upsert_rainfall_observations
         observations = self.fetch_observations()
         if not observations:
             raise RuntimeError("No rainfall observation data available.")

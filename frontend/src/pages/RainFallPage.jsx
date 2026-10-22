@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { backfillImages, fetchDailyImages, fetchImageHistory, fetchLatestImage, fetchRainfallTop } from "../api";
+import { fetchDailyImages, fetchRainfallTop } from "../api";
+import useCurrentImage, { taipeiDate } from "../useCurrentImage";
+import SourceImage from "../SourceImage";
 
 const rainfallMetrics = [
   { key: "10min", label: "10 Min" },
@@ -12,24 +14,12 @@ const rainfallMetrics = [
   { key: "2days", label: "Since 2 Days Ago" },
 ];
 
-function getImageDate(entry) {
-  return entry?.image_time?.slice(0, 10) || "";
-}
-
-function formatBackfillSummary(summary) {
-  if (!summary) {
-    return "";
-  }
-
-  return `Backfill complete: ${summary.inserted} inserted, ${summary.skipped_existing} already existed, ${summary.missing} missing, ${summary.failed} failed.`;
-}
-
 function formatObservedAt(observedAt) {
   if (!observedAt) {
     return "-";
   }
 
-  return observedAt.slice(0, 16).replace("T", " ");
+  return formatDateTimeTaiwan(observedAt);
 }
 
   function formatDateTimeTaiwan(value) {
@@ -56,102 +46,38 @@ function formatObservedAt(observedAt) {
   }
 
 export default function RainFallPage() {
-  const [image, setImage] = useState(null);
-  const [error, setError] = useState("");
+  const { image, error, history: rainfallHistory, selectedTime: selectedRainfallTime,
+    setSelectedTime: setSelectedRainfallTime, selected: selectedRainfall, status } = useCurrentImage("rainfall");
   const [selectedMetric, setSelectedMetric] = useState("10min");
   const [rainfallTop, setRainfallTop] = useState(null);
   const [rainfallTopError, setRainfallTopError] = useState("");
   const [isRainfallTopLoading, setIsRainfallTopLoading] = useState(false);
-  const [rainfallHistory, setRainfallHistory] = useState([]);
-  const [selectedRainfallTime, setSelectedRainfallTime] = useState("");
   const [rainfallDailyImages, setRainfallDailyImages] = useState([]);
-  const [isBackfilling, setIsBackfilling] = useState(false);
-  const [backfillSummary, setBackfillSummary] = useState(null);
-
-  async function loadRainfallData() {
-    const latest = await fetchLatestImage("rainfall");
-    const historyDate = getImageDate(latest);
-    const [history, dailyImages] = historyDate
-      ? await Promise.all([
-          fetchImageHistory("rainfall", { date: historyDate }),
-          fetchDailyImages("rainfall", { date: historyDate }),
-        ])
-      : [[], []];
-    const selectableHistory = history.filter((entry) => !entry.image_time?.endsWith("00:00"));
-    const hasLatestInHistory = selectableHistory.some((entry) => entry.image_time === latest.image_time);
-
-    setImage(latest);
-    setRainfallHistory(selectableHistory);
-    setRainfallDailyImages(dailyImages);
-    setSelectedRainfallTime(hasLatestInHistory ? latest.image_time : selectableHistory.at(-1)?.image_time || latest.image_time || "");
-  }
+  const [dailyError, setDailyError] = useState("");
 
   useEffect(() => {
-    async function load() {
-      try {
-        setError("");
-        setImage(null);
-        setBackfillSummary(null);
-        setRainfallHistory([]);
-        setRainfallDailyImages([]);
-        setSelectedRainfallTime("");
-        await loadRainfallData();
-      } catch (err) {
-        setError(err.message);
-      }
-    }
-
-    load();
+    let active = true;
+    fetchDailyImages("rainfall").then(items => {
+      if (active) setRainfallDailyImages(items);
+    }).catch(() => { if (active) setDailyError("官方今日／昨日／前日雨量圖讀取失敗。"); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    async function loadRainfallTop() {
-      setIsRainfallTopLoading(true);
-      setRainfallTopError("");
-
-      try {
-        const ranking = await fetchRainfallTop(selectedMetric);
-        setRainfallTop(ranking);
-      } catch (err) {
-        setRainfallTop(null);
-        setRainfallTopError(err.message);
-      } finally {
-        setIsRainfallTopLoading(false);
-      }
-    }
-
-    loadRainfallTop();
+    let active = true;
+    setIsRainfallTopLoading(true);
+    setRainfallTopError("");
+    fetchRainfallTop(selectedMetric).then(ranking => {
+      if (active) setRainfallTop(ranking);
+    }).catch(err => {
+      if (active) { setRainfallTop(null); setRainfallTopError(err.message); }
+    }).finally(() => { if (active) setIsRainfallTopLoading(false); });
+    return () => { active = false; };
   }, [selectedMetric]);
-
-  async function handleBackfillRainfall() {
-    setIsBackfilling(true);
-    setError("");
-
-    try {
-      const summary = await backfillImages("rainfall", { range: "today" });
-      setBackfillSummary(summary);
-      await loadRainfallData();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsBackfilling(false);
-    }
-  }
-
-  if (error) {
-    return <p>{error}</p>;
-  }
-
-  if (!image) {
-    return <p>Loading...</p>;
-  }
-
-  const selectedRainfall =
-    rainfallHistory.find((entry) => entry.image_time === selectedRainfallTime) || image;
-  const backfillMessage = formatBackfillSummary(backfillSummary);
 
   return (
     <section>
+      {image ? <>
       <h2>{selectedRainfall.title}</h2>
       <div className="image-meta-row">
         <p>Source: {selectedRainfall.source}</p>
@@ -160,48 +86,46 @@ export default function RainFallPage() {
             </a>
       </div>
       <p>{selectedRainfall.image_time ? `Image Time: ${selectedRainfall.image_time}` : `Fetched At: ${selectedRainfall.fetched_at}`}</p>
+      </> : <p>{error || "Loading..."}</p>}
       <div className="detail-layout">
+        {image ? <>
         <div className="controls">
           <label className="time-select">
-            <span>Today Available Rainfall Images</span>
+            <span>Available Rainfall Images (Taipei date)</span>
             <select
               value={selectedRainfallTime}
               onChange={(event) => setSelectedRainfallTime(event.target.value)}
               disabled={!rainfallHistory.length}
             >
               {rainfallHistory.map((entry) => (
-                <option value={entry.image_time} key={`${entry.id}-${entry.image_time}`}>
+                <option value={entry.image_time} key={`${entry.image_type}-${entry.image_time}`}>
                   {entry.image_time}
                 </option>
               ))}
             </select>
           </label>
-          <button
-            className="primary-button backfill-button"
-            type="button"
-            onClick={handleBackfillRainfall}
-            disabled={isBackfilling}
-          >
-            {isBackfilling ? "Backfilling..." : "Backfill Images"}
-          </button>
           <p className="status-message status" aria-live="polite">
-            {backfillMessage || (rainfallHistory.length ? `${rainfallHistory.length} images available for this date.` : "No rainfall history loaded.")}
+            {status}
           </p>
         </div>
-        <img className="detail-image cwa-detail-image" src={selectedRainfall.image_url} alt={selectedRainfall.title} />
+        <SourceImage image={selectedRainfall} />
+        </> : null}
         {rainfallDailyImages.length ? (
           <section className="rainfall-daily-section" aria-label="Daily rainfall representatives">
             <div className="rainfall-daily-grid">
               {rainfallDailyImages.map((entry) => (
                 <article className="image-panel rainfall-daily-card" key={`${entry.label}-${entry.image_time}`}>
-                  <p>{entry.represented_date}</p>
-                  <img className="detail-image rainfall-daily-image" src={entry.image_url} alt={`${entry.label} ${entry.represented_date}`} />
+                  <p>{entry.label} {entry.represented_date}</p>
+                  <SourceImage image={entry} className="detail-image rainfall-daily-image" alt={`${entry.label} ${entry.represented_date}`} />
                 </article>
               ))}
             </div>
           </section>
         ) : null}
       </div>
+      {dailyError ? <p className="status-message">{dailyError}</p> : null}
+      {rainfallDailyImages.length && rainfallDailyImages[0].represented_date !== taipeiDate()
+        ? <p className="status-message">單日雨量圖尚未更新至今日；請依圖上標示的實際日期判讀。</p> : null}
       <section className="rainfall-monitoring-section" aria-labelledby="rainfall-monitoring-heading">
         <div className="rainfall-monitoring-header">
           <div>

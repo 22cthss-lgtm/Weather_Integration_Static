@@ -1,7 +1,7 @@
 # 氣象圖資靜態資料更新
 
 Python Fetcher → 原有 Services → ImagePayload → 靜態 JSON → React。
-不需要 Flask、SQLite、API Key 或原始後端專案。
+不需要 Flask、SQLite 或原始後端專案。圖片流程不需 API Key；雨量排行需執行端的 CWA_API_KEY。
 
 ## 安裝與執行
 
@@ -11,7 +11,7 @@ Python Fetcher → 原有 Services → ImagePayload → 靜態 JSON → React。
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r fetchers\requirements.txt
 
-# 更新九種已移植資源（五種單圖與四種群組）
+# 更新全部已移植資源（含本階段三種當日圖資與雨量排行）
 .\.venv\Scripts\python.exe -B fetchers\update_images.py
 
 # 僅更新第四階段四種單圖
@@ -68,9 +68,9 @@ TCHP 來源只有日期，不補上午夜或推測觀測時區。
 
 ## React 與部署
 
-api.js 的九種 latest-image 類型讀取各自靜態路徑，尊重 Vite BASE_URL，
-使用 cache: "no-cache"，失敗不回退 Flask。Dashboard、ImagePage、CimssPage、SeaIcePage、CSS 與路由均不變。
-其餘未移植圖資與歷史、回補等功能仍保留原 API 行為，不在本階段範圍。
+api.js 的十二種 latest-image 類型讀取各自靜態路徑，尊重 Vite BASE_URL，
+使用 cache: "no-cache"，失敗不回退 Flask。Dashboard、ImagePage、CimssPage、SeaIcePage、CSS 與路由均不變；雷達、衛星、雨量頁按第六階段調整。
+雷達、衛星、雨量頁的最新圖、當日時次、雨量單日圖與排行皆讀取靜態資料；沒有網頁回補 API 呼叫。
 
 ```powershell
 cd frontend
@@ -98,7 +98,7 @@ npm run build
 Python 測試覆蓋圖片時間、KMA API／回溯一致性、產品選擇、來源失敗、
 空／多筆／無效資料保留舊檔、圖片驗證失敗、原子替換及無 Flask／資料庫匯入。
 React 測試涵蓋根目錄與子路徑、讀取失敗不回退，以及 Dashboard／詳細頁呈現。
-整合測試直接使用 public 中真實 Fetcher 輸出，請先成功更新九種 JSON；
+整合測試直接使用 public 中真實 Fetcher 輸出，請先成功更新各測試所需的圖資與本階段當日／排行 JSON；
 單元測試不會將模擬資料寫入 public。
 
 
@@ -152,3 +152,98 @@ HTTP Last-Modified 不代表產品觀測時間，發布時不作為 image_time �
 api.test.js 涵蓋四組的根目錄與子路徑 URL，以及讀取失敗不回退 API。
 
 本階段沒有修改其他未移植產品、沒有設定 Actions／Pages，也沒有 commit 或 push。
+
+
+## 第六階段：雷達、衛星、雨量當日資料
+
+在 C:\Weather_Integration_Static 執行（已安裝 requirements.txt）：
+
+```powershell
+python -B fetchers/update_images.py radar satellite rainfall rainfall_rankings
+```
+
+這次開發已實際執行，不需立即重跑；此命令供日後更新。
+只指定以上四項時不更新其他圖資。全部作業會繼續嘗試，即使其中一項失敗。
+不需要也不會啟動 Flask／SQLite。本階段不設定排程或發布作業、不 commit/push。
+
+### 機密設定
+
+專案根目錄 `.env`（已被 Git 忽略）：
+
+```text
+CWA_API_KEY=你的授權碼
+```
+
+也可在執行環境設定 CWA_API_KEY。既有環境變數優先於 .env。
+由 python-dotenv 讀取根目錄檔案，不使用會載入 SQLite 的 src.config。
+請勿改用 VITE_ 變數，不要把 Key 放進 public、分享網址或提交 Git。
+缺少 Key、來源失敗或格式異常時保留前次成功排行。
+公開內容只包含固定的排行欄位，不寫入原始回應、請求授權參數或來源例外。
+
+### 當日時次
+
+| type | 台北當日起點 | 間隔 |
+| --- | --- | --- |
+| radar | 00:00 | 10 分鐘 |
+| satellite | 00:00 | 10 分鐘 |
+| rainfall | 00:30 | 30 分鐘 |
+
+Fetcher 先確認最新有效圖片，再以原 CWAService 時次產生器與網址建構器蒐集
+起點至該圖片時刻。這是資料產生端的工作，網頁重新整理不會向 CWA 執行回補。
+最多六個獨立 URL 同時驗證，只讀取少量圖片 bytes，不將圖片保存到 public。
+404／410 記為 missing；網路、HTTP 或驗證異常記為 failed。
+官方圖片網址未必永久有效；既有歷史 metadata 不是圖片歸檔。
+
+| 輸出路徑（相對 frontend/public） | 結構 |
+| --- | --- |
+| data/images/{type}/latest.json | 原七欄位圖片物件 |
+| data/images/{type}/history/YYYY-MM-DD.json | image_type、date、timezone、updated_at、range_start/end、expected_count、complete、missing[]、failed[]、items[] |
+| data/images/rainfall/daily/latest.json | date、timezone、fetched_at、items[]（三張官方單日圖） |
+| data/rainfall/rankings/latest.json | source、dataset_id、fetched_at、rankings（各期間） |
+
+history.items 每筆保留七個圖片欄位，依 image_time 升冪排列。
+相同日期重跑以時刻去重並合併，只新增已驗證資料，先前成功紀錄不因缺圖消失。
+全部候選都失敗／不存在時不覆蓋舊日期檔。部分成功可以累積，但 complete=false
+及 missing/failed 清單明示缺漏；有 failed 時命令非零退出。
+沒有任意跨日查詢 UI；不自動刪除舊檔，也不承諾官方 URL 的長期可用性。
+
+最新圖片時刻帶 +08:00，抓取／寫入時間是 UTC。
+來源最新時刻倒退時保留較新的成功 latest；未來時間與不合時次的資料拒絕發布。
+跨午夜尚無當日圖時保留舊圖，頁面明示日期且不把前一日時次塞進今日選單。
+雨量 00:00 圖屬於已結束的單日累積，不能作為當日 00:30 起的時次。
+
+每份 JSON 沿用 src/publication.py 的同目錄暫存檔／fsync／原子替換。
+latest、history、daily、ranking 是獨立成功資源，並非跨多檔交易；例如最新圖成功
+但歷史掃描失敗，會保留成功最新圖及先前歷史，並回報未完成項目，不誤稱全部失敗。
+
+### 官方三張單日雨量圖
+
+讀取官方 RainfallImg_Day.js 正常配色 Tab0 中 Day0、Day1、Day2 的首筆，
+這與官方頁面切換單日圖使用的索引相同，不自行選取某日最後一張代替結算圖。
+今日圖是今日 00:00 至圖資時刻；昨日圖是昨日 00:00 至今日 00:00；
+前日圖是前日 00:00 至昨日 00:00。
+
+每筆保留圖片七欄位，加 label、represented_date、accumulation_start、accumulation_end。
+represented_date 僅有日期；image_time 可以是該日期隔日的午夜終點。
+三張圖、日期與結算邊界全數通過驗證後才一次替換 daily JSON。
+只要任一張缺失／日期不一致，就保留前次三張，頁面依實際日期提示尚未更新。
+daily 抓取與顯示不依賴 latest/history 成功。
+
+### 雨量排行與頁面
+
+沿用 RainfallObservationService 取得 O-A0002-001、既有解析與期間映射。
+資料庫儲存匯入只留在未使用的舊 refresh_observations 方法內，靜態流程完全不載入。
+一次來源回應產生整份快照；同站重複資料取較新觀測，排除缺值、特殊碼、
+非有限值及負雨量，零雨量有效。各期間降冪、站名與站碼穩定排序，最多前10筆。
+保留原8個頁籤；JSON 另保留原服務支援的 today 期間，不新增頁籤。
+每筆含 rank、station_id/name、county、town、rainfall、observed_at、fetched_at。
+觀測時刻與抓取時刻分開，頁面顯示時轉台北時間。
+排行是最近一次產生並發布的快照，切換頁籤不會觸發來源 API。
+
+三頁移除 Backfill 按鈕，保留版面、CSS 與路由。共用小型 useCurrentImage
+處理時次、午夜與局部失敗；SourceImage 在官方圖失效時顯示來源連結，
+不悄悄改看另一個時刻。歷史、單日圖、排行的錯誤分區顯示。
+所有新靜態 URL 尊重 Vite BASE_URL；正式更新需在抓取後重新 build／發布。
+
+測試使用 unittest 與 Vitest，包含真實 public 輸出整合測試。
+不會把測試模擬資料寫入 public。新輸出需先以 Fetcher 成功產生。

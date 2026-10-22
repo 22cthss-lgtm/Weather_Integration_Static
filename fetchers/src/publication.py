@@ -61,6 +61,11 @@ def publish_image(image_type, payloads, output_path):
             raise RuntimeError(f'{image_type}: expected exactly one image; previous JSON preserved')
         data = items[0]
         validate_image(image_type, data)
+    return atomic_write_json(data, output_path, prefix=f'.{image_type}-')
+
+
+def atomic_write_json(data, output_path, prefix='.data-'):
+    """Serialize before touching the destination; use one atomic writer for all resources."""
     content = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + '\n'
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +73,7 @@ def publish_image(image_type, payloads, output_path):
     try:
         with tempfile.NamedTemporaryFile(
             mode='w', encoding='utf-8', newline='\n', dir=output_path.parent,
-            prefix=f'.{image_type}-', suffix='.tmp', delete=False,
+            prefix=prefix, suffix='.tmp', delete=False,
         ) as temporary:
             temporary_path = Path(temporary.name)
             temporary.write(content)
