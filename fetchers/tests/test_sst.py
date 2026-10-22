@@ -66,7 +66,7 @@ class PublicationTests(unittest.TestCase):
             output = Path(directory) / "latest.json"
             output.write_text("previous success", encoding="utf-8")
             with patch.object(runner.OceanService, "fetch", return_value=iter([payload])):
-                with patch.object(runner.os, "replace", side_effect=OSError("replace denied")):
+                with patch("src.publication.os.replace", side_effect=OSError("replace denied")):
                     with self.assertRaises(OSError):
                         runner.update_sst(output)
             self.assertEqual(output.read_text(encoding="utf-8"), "previous success")

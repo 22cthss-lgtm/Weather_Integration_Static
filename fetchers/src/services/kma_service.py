@@ -90,6 +90,9 @@ class KMAService(BaseImageService):
             f"KMA 850hPa Analysis {display_time}",
             image_url,
             self.analysis_chart_url,
+            image_time=datetime.strptime(display_time, "%Y-%m-%d %H:%M").replace(
+                tzinfo=timezone(timedelta(hours=9))
+            ).isoformat(),
         )
 
     def fetch(self):

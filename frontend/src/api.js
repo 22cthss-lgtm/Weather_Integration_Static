@@ -1,12 +1,13 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5174";
+const STATIC_IMAGE_TYPES = new Set(["sst", "temperature", "weather_chart", "850hpa", "tchp"]);
 
 export async function fetchLatestImage(type) {
-  if (type === "sst") {
-    const response = await fetch(`${import.meta.env.BASE_URL}data/images/sst/latest.json`, {
+  if (STATIC_IMAGE_TYPES.has(type)) {
+    const response = await fetch(`${import.meta.env.BASE_URL}data/images/${type}/latest.json`, {
       cache: "no-cache",
     });
     if (!response.ok) {
-      throw new Error("Failed to fetch latest image for sst (static JSON)");
+      throw new Error(`Failed to fetch latest image for ${type} (static JSON)`);
     }
     return response.json();
   }

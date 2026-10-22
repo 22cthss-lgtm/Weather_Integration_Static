@@ -7,20 +7,22 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-test.each(["/", "/weather-static/"])("SST reads static JSON under base %s", async (base) => {
+test.each(["sst", "temperature", "weather_chart", "850hpa", "tchp"].flatMap(type =>
+  ["/", "/weather-static/"].map(base => [type, base])
+))("%s reads static JSON under base %s", async (type, base) => {
   vi.stubEnv("BASE_URL", base);
-  const payload = { image_type: "sst" };
+  const payload = { image_type: type };
   const request = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload)));
   vi.stubGlobal("fetch", request);
-  expect(await fetchLatestImage("sst")).toEqual(payload);
-  expect(request).toHaveBeenCalledExactlyOnceWith(`${base}data/images/sst/latest.json`, { cache: "no-cache" });
+  expect(await fetchLatestImage(type)).toEqual(payload);
+  expect(request).toHaveBeenCalledExactlyOnceWith(`${base}data/images/${type}/latest.json`, { cache: "no-cache" });
 });
 
-test("missing SST JSON fails without falling back to Flask", async () => {
+test.each(["sst", "temperature", "weather_chart", "850hpa", "tchp"])("missing %s JSON fails without falling back to Flask", async (type) => {
   const request = vi.fn().mockResolvedValue(new Response("", { status: 404 }));
   vi.stubGlobal("fetch", request);
-  await expect(fetchLatestImage("sst")).rejects.toThrow("sst");
-  expect(request).toHaveBeenCalledExactlyOnceWith("/data/images/sst/latest.json", { cache: "no-cache" });
+  await expect(fetchLatestImage(type)).rejects.toThrow(type);
+  expect(request).toHaveBeenCalledExactlyOnceWith(`/data/images/${type}/latest.json`, { cache: "no-cache" });
 });
 
 test("other products retain their API URL", async () => {

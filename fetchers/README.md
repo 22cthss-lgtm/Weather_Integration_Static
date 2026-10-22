@@ -1,67 +1,99 @@
-# JMA SST 靜態資料更新
+# 氣象圖資靜態資料更新
+
+Python Fetcher → 原有 Services → ImagePayload → 靜態 JSON → React。
+不需要 Flask、SQLite、API Key 或原始後端專案。
+
+## 安裝與執行
 
 在專案根目錄執行（Python 3.10 以上）：
 
 ```powershell
-cd C:\Weather_Integration_Static
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r fetchers\requirements.txt
+
+# 更新五種已移植圖資（含 SST）
+.\.venv\Scripts\python.exe -B fetchers\update_images.py
+
+# 僅更新本階段四種圖資
+.\.venv\Scripts\python.exe -B fetchers\update_images.py temperature weather_chart 850hpa tchp
+
+# 原有 SST 入口仍可使用
 .\.venv\Scripts\python.exe -B fetchers\update_sst.py
 ```
 
-後續手動更新只需最後一行。入口以自身檔案位置定位輸出，不依賴目前工作目錄。
-OceanService 只匯入 `base.py` 與 requests，不載入 `config.py`、Flask 或 SQLite，
-也不讀取原始專案。`config.py` 留給尚未移植的服務，本階段未修改。
+Windows 需求包含 tzdata，供 ZoneInfo("Asia/Taipei") 使用。
+預設輸出以入口檔案位置定位，不依賴工作目錄。
+可用 `--output-root <目錄>` 指定另一個 images 根目錄。
+省略產品參數會更新全部；未知產品名稱在抓取前即回報錯誤。
 
-## 資料流程與契約
+## 共用設計與資料契約
 
-JMA 日期腳本 → 原有 OceanService 組合圖片網址並確認 image Content-Type →
-ImagePayload → JSON → api.js 的 fetchLatestImage("sst") → Dashboard 與 ImagePage。
+`update_images.py` 註冊表只對應 Service 與指定抓取方法，CWA 不呼叫
+會順便抓取其他產品的 fetch()。沿用原有來源解析、發布延遲及回溯搜尋邏輯。
+`src/publication.py` 統一處理驗證、序列化及原子寫檔；update_sst.py 也使用此模組。
+新產品只需新增註冊及必要的時間解析，不需複製發布流程。
 
-輸出：`frontend/public/data/images/sst/latest.json`。
-內容為單一物件，直接保留原 API／頁面使用的欄位：
-`image_type`、`source`、`title`、`image_url`、`source_url`、`fetched_at`、`image_time`。
-不新增資料庫 ID 或 JSON 外層包裝。
+每個產品輸出至 `frontend/public/data/images/{type}/latest.json`。
+內容為單一物件，保留七個欄位：image_type、source、title、image_url、
+source_url、fetched_at、image_time。不新增資料庫 ID 或外層包裝。
+圖片保留官方遠端網址，不下載或重新託管圖片。
 
-- `image_time`：JMA 每日分析的產品日期（YYYY-MM-DD）。來源只提供日期，
-  不虛構午夜、觀測時刻或時區，也不以抓取時間替代。
-- `fetched_at`：實際抓取 metadata 時間，ISO 8601 UTC，含 `+00:00`。
-- 圖片保留原本 JMA 遠端 URL 與 fetched 查詢參數，不下載圖片檔。
-- 來源、解析、驗證或寫入失敗時，命令以非零狀態退出並在 stderr 回報；
-  不以空資料覆蓋舊檔。成功時先寫同目錄暫存檔，再原子替換 latest.json。
+| type | 原有來源／Service | image_time 語意 |
+| --- | --- | --- |
+| sst | JMA／OceanService | 每日產品日期，YYYY-MM-DD |
+| temperature | CWA／fetch_temperature | 台北時刻，ISO 8601 含 +08:00 |
+| weather_chart | CWA／fetch_weather_chart | 已知時含 +08:00；未知為 null |
+| 850hpa | KMA／KMAService | 韓國時刻，ISO 8601 含 +09:00 |
+| tchp | CWA／fetch_tchp | 每日產品日期，YYYY-MM-DD |
 
-JSON 放在 Vite public 目錄，開發時提供 `/data/images/sst/latest.json`，
-Build 時原樣複製到 `dist/data/images/sst/latest.json`。
-api.js 使用 `import.meta.env.BASE_URL` 組合 SST 路徑並重新驗證快取，
-讀取失敗不回退 Flask。其他產品仍使用原 API，尚不能獨立顯示資料。
+fetched_at 一律為實際取得 metadata 的 UTC 時間，含 +00:00。
+不把抓取時間、網址快取參數或 HTTP Last-Modified 當成圖片觀測時間。
+KMA API 的 tm 是 KST；回溯圖片檔名是 UTC，轉換後代表相同時刻。
+TCHP 來源只有日期，不補上午夜或推測觀測時區。
+目前 CWA 天氣圖頁面未提供既有解析器可辨識的圖片時刻，因此保留 null；
+原 ImagePage 顯示轉成台北時間的 Fetched At。
 
-## 前端啟動與驗證
+## 失敗處理
+
+- metadata、解析或圖片驗證失敗，保留該產品上一次成功的 JSON。
+- 發布前確認圖片 HTTP 狀態與 image Content-Type；HTML 錯誤頁不算成功。
+- 必須恰好一筆且通過欄位、網址及時間驗證，才開始寫入。
+- 先寫同目錄暫存檔並 flush/fsync，再原子替換；寫入失敗清理暫存檔。
+- 各圖資獨立更新，單一失敗不阻止其他產品；任一失敗時整批退出碼為 1，
+  錯誤寫入 stderr。首次抓取失敗不建立空 JSON。
+- 舊檔可能因來源中斷而過期，可由 fetched_at 追查最後成功抓取時間。
+
+## React 與部署
+
+api.js 的五種 latest-image 類型讀取各自靜態路徑，尊重 Vite BASE_URL，
+使用 cache: "no-cache"，失敗不回退 Flask。Dashboard、ImagePage、CSS 均不變。
+其餘未移植圖資與歷史、回補等功能仍保留原 API 行為，不在本階段範圍。
 
 ```powershell
-cd C:\Weather_Integration_Static\frontend
+cd frontend
 npm install
 npm run dev
 ```
 
-開啟 http://localhost:5173/，點選 JMA SST 卡片；詳細頁為 `/images/sst`。
-若 Vite 因連接埠占用選擇其他連接埠，以終端機輸出為準。
-更新 JSON 後重新整理頁面即可讀取；正式發佈需在更新 JSON 後重新 Build。
+詳細頁為 /images/temperature、/images/weather_chart、/images/850hpa、
+/images/tchp 及 /images/sst。本機更新 JSON 後重新整理即可；
+正式發佈必須更新 JSON 後重新 Build。Vite 會將 public 資源原樣複製至
+`dist/data/images/{type}/latest.json`。
+若部署到 Repository 子路徑，仍須另設 Vite base、React Router basename
+及靜態主機路由策略。本階段沒有建立排程或發布設定。
+
+## 驗證
 
 ```powershell
-cd C:\Weather_Integration_Static
+# 專案根目錄
 .\.venv\Scripts\python.exe -B -m unittest discover -s fetchers\tests -v
 cd frontend
 npm test -- --run
 npm run build
 ```
 
-Python 單元測試使用獨立測試目錄；React 整合測試讀取實際產生的 latest.json，
-執行前請先成功更新 SST。測試不會將模擬資料放入 public 目錄。
-
-未來部署到 Repository 子路徑時，須另外設定 Vite base 與 React Router basename
-及靜態主機的路由策略。本次只讓 SST JSON URL 尊重 base，
-沒有建立 GitHub Repository、Actions 或 Pages 設定。
-
-參考：[JMA 產品說明](https://www.data.jma.go.jp/goos/data/pub/JMA-product/him_sst_pac_D/Readme_him_sst_pac_D)、
-[Vite public 目錄](https://vite.dev/guide/assets.html#the-public-directory)、
-[Vite base](https://vite.dev/guide/build.html#public-base-path)。
+Python 測試覆蓋圖片時間、KMA API／回溯一致性、產品選擇、來源失敗、
+空／多筆／無效資料保留舊檔、圖片驗證失敗、原子替換及無 Flask／資料庫匯入。
+React 測試涵蓋根目錄與子路徑、讀取失敗不回退，以及 Dashboard／詳細頁呈現。
+整合測試直接使用 public 中真實 Fetcher 輸出，請先成功更新五種 JSON；
+單元測試不會將模擬資料寫入 public。

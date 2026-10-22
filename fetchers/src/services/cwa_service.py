@@ -69,7 +69,7 @@ class CWAService(BaseImageService):
                 params={"_": datetime.now(self.satellite_timezone).timestamp()},
                 verify=False,
             )
-            exists = response.ok
+            exists = response.ok and (response.headers.get("content-type") or "").lower().startswith("image/")
             response.close()
             return exists
         except requests.RequestException:
@@ -267,6 +267,9 @@ class CWAService(BaseImageService):
             f"CWA Temperature Distribution {display_time}",
             image_url,
             self.temperature_source_url,
+            image_time=datetime.strptime(display_time, "%Y-%m-%d %H:%M").replace(
+                tzinfo=self.satellite_timezone
+            ).isoformat(),
         )
 
     def resolve_rainfall_image_url(self) -> tuple[str, str] | None:
@@ -386,6 +389,9 @@ class CWAService(BaseImageService):
             title,
             image_url,
             self.weather_chart_source_url,
+            image_time=(datetime.strptime(display_time, "%Y-%m-%d %H:%M").replace(
+                tzinfo=self.satellite_timezone
+            ).isoformat() if display_time else None),
         )
 
     def resolve_tchp_image_url(self) -> tuple[str, str] | None:
@@ -403,7 +409,7 @@ class CWAService(BaseImageService):
                 cache_bust = str(int(datetime.now(self.satellite_timezone).timestamp()))
                 image_url = f"{self.cwa_base_url}/Data/TCHP/{match.group('filename')}?T={cache_bust}"
                 image_date = datetime.strptime(match.group("date"), "%Y-%m-%d").replace(tzinfo=self.satellite_timezone)
-                display_time = image_date.strftime("%Y-%m-%d 00:00")
+                display_time = image_date.strftime("%Y-%m-%d")
                 return image_url, display_time
         except requests.RequestException:
             pass
@@ -421,6 +427,7 @@ class CWAService(BaseImageService):
             f"CWA TCHP {display_time}",
             image_url,
             self.weather_chart_source_url,
+            image_time=display_time,
         )
 
     def fetch(self):
