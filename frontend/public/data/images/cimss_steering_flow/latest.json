@@ -1,0 +1,65 @@
+{
+  "image_type": "cimss_steering_flow",
+  "source": "CIMSS",
+  "title": "CIMSS Steering Flow 200 - 700 mb",
+  "image_url": "https://tropic.ssec.wisc.edu/real-time/westpac/winds/wgmsdlm6.GIF?ts=1792663058",
+  "source_url": "https://tropic.ssec.wisc.edu/real-time/dlmmain.php?&basin=westpac&sat=wgms&prod=dlm1&zoom=&time=",
+  "fetched_at": "2026-10-22T09:57:38.109758+00:00",
+  "image_time": null,
+  "images": [
+    {
+      "image_type": "cimss_steering_flow_200_700mb",
+      "source": "CIMSS",
+      "title": "CIMSS Steering Flow 200 - 700 mb",
+      "image_url": "https://tropic.ssec.wisc.edu/real-time/westpac/winds/wgmsdlm6.GIF?ts=1792663058",
+      "source_url": "https://tropic.ssec.wisc.edu/real-time/dlmmain.php?&basin=westpac&sat=wgms&prod=dlm1&zoom=&time=",
+      "fetched_at": "2026-10-22T09:57:38.109758+00:00",
+      "image_time": null
+    },
+    {
+      "image_type": "cimss_steering_flow_250_850mb",
+      "source": "CIMSS",
+      "title": "CIMSS Steering Flow 250 - 850 mb",
+      "image_url": "https://tropic.ssec.wisc.edu/real-time/westpac/winds/wgmsdlm5.GIF?ts=1792663055",
+      "source_url": "https://tropic.ssec.wisc.edu/real-time/dlmmain.php?&basin=westpac&sat=wgms&prod=dlm1&zoom=&time=",
+      "fetched_at": "2026-10-22T09:57:38.109749+00:00",
+      "image_time": null
+    },
+    {
+      "image_type": "cimss_steering_flow_300_850mb",
+      "source": "CIMSS",
+      "title": "CIMSS Steering Flow 300 - 850 mb",
+      "image_url": "https://tropic.ssec.wisc.edu/real-time/westpac/winds/wgmsdlm4.GIF?ts=1792663054",
+      "source_url": "https://tropic.ssec.wisc.edu/real-time/dlmmain.php?&basin=westpac&sat=wgms&prod=dlm1&zoom=&time=",
+      "fetched_at": "2026-10-22T09:57:38.109739+00:00",
+      "image_time": null
+    },
+    {
+      "image_type": "cimss_steering_flow_400_850mb",
+      "source": "CIMSS",
+      "title": "CIMSS Steering Flow 400 - 850 mb",
+      "image_url": "https://tropic.ssec.wisc.edu/real-time/westpac/winds/wgmsdlm3.GIF?ts=1792663052",
+      "source_url": "https://tropic.ssec.wisc.edu/real-time/dlmmain.php?&basin=westpac&sat=wgms&prod=dlm1&zoom=&time=",
+      "fetched_at": "2026-10-22T09:57:38.109729+00:00",
+      "image_time": null
+    },
+    {
+      "image_type": "cimss_steering_flow_500_850mb",
+      "source": "CIMSS",
+      "title": "CIMSS Steering Flow 500 - 850 mb",
+      "image_url": "https://tropic.ssec.wisc.edu/real-time/westpac/winds/wgmsdlm2.GIF?ts=1792663050",
+      "source_url": "https://tropic.ssec.wisc.edu/real-time/dlmmain.php?&basin=westpac&sat=wgms&prod=dlm1&zoom=&time=",
+      "fetched_at": "2026-10-22T09:57:38.109716+00:00",
+      "image_time": null
+    },
+    {
+      "image_type": "cimss_steering_flow_700_850mb",
+      "source": "CIMSS",
+      "title": "CIMSS Steering Flow 700 - 850 mb",
+      "image_url": "https://tropic.ssec.wisc.edu/real-time/westpac/winds/wgmsdlm1.GIF?ts=1792663048",
+      "source_url": "https://tropic.ssec.wisc.edu/real-time/dlmmain.php?&basin=westpac&sat=wgms&prod=dlm1&zoom=&time=",
+      "fetched_at": "2026-10-22T09:57:38.109666+00:00",
+      "image_time": null
+    }
+  ]
+}

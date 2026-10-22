@@ -42,6 +42,7 @@ class NSIDCService(BaseImageService):
             return None
 
     def fetch_image_response(self, image_url: str) -> requests.Response | None:
+        response = None
         try:
             response = requests.get(
                 image_url,
@@ -50,8 +51,13 @@ class NSIDCService(BaseImageService):
                 params={"_": int(datetime.now(timezone.utc).timestamp())},
             )
             response.raise_for_status()
+            if not response.content or not (response.headers.get('Content-Type') or '').lower().startswith('image/'):
+                response.close()
+                return None
             return response
         except requests.RequestException:
+            if response is not None:
+                response.close()
             return None
 
     def extract_image_time_from_bytes(self, image_bytes: bytes) -> str | None:
@@ -64,7 +70,7 @@ class NSIDCService(BaseImageService):
             return None
 
         parsed_date = datetime.strptime(match.group(1), "%d %b %Y")
-        return parsed_date.strftime("%Y-%m-%d 00:00")
+        return parsed_date.strftime("%Y-%m-%d")
 
     def extract_image_time_from_headers(self, response: requests.Response) -> str | None:
         last_modified = response.headers.get("Last-Modified")
@@ -72,22 +78,23 @@ class NSIDCService(BaseImageService):
             return None
 
         parsed_date = parsedate_to_datetime(last_modified)
-        return parsed_date.strftime("%Y-%m-%d 00:00")
+        return parsed_date.strftime("%Y-%m-%d")
 
     def resolve_image_time(self, image_url: str) -> str | None:
         response = self.fetch_image_response(image_url)
         if response is None:
-            return None
+            raise RuntimeError("NSIDC image request failed")
 
         try:
             image_time = self.extract_image_time_from_bytes(response.content)
             if image_time:
                 return image_time
-            return self.extract_image_time_from_headers(response)
+            # A file modification date is not the daily product date.
+            return None
         finally:
             response.close()
 
-    def resolve_image_set(self, required_urls: dict[str, str]) -> dict[str, dict[str, str]] | None:
+    def resolve_image_set(self, required_urls: dict[str, str]) -> dict[str, dict[str, str | None]] | None:
         page_html = self.fetch_page_html()
         if page_html is None:
             return None
@@ -95,11 +102,9 @@ class NSIDCService(BaseImageService):
         if not all(image_url in page_html for image_url in required_urls.values()):
             return None
 
-        resolved_images: dict[str, dict[str, str]] = {}
+        resolved_images: dict[str, dict[str, str | None]] = {}
         for image_type, image_url in required_urls.items():
             image_time = self.resolve_image_time(image_url)
-            if image_time is None:
-                return None
             resolved_images[image_type] = {
                 "image_url": image_url,
                 "image_time": image_time,
@@ -107,7 +112,7 @@ class NSIDCService(BaseImageService):
 
         return resolved_images
 
-    def resolve_latest_arctic_sea_ice_images(self) -> dict[str, dict[str, str]] | None:
+    def resolve_latest_arctic_sea_ice_images(self) -> dict[str, dict[str, str | None]] | None:
         return self.resolve_image_set(
             {
                 "seaice_arctic_extent": self.extent_image_url,
@@ -116,7 +121,7 @@ class NSIDCService(BaseImageService):
             }
         )
 
-    def resolve_latest_antarctic_sea_ice_images(self) -> dict[str, dict[str, str]] | None:
+    def resolve_latest_antarctic_sea_ice_images(self) -> dict[str, dict[str, str | None]] | None:
         return self.resolve_image_set(
             {
                 "seaice_antarctic_extent": self.antarctic_extent_image_url,
@@ -127,7 +132,7 @@ class NSIDCService(BaseImageService):
 
     def emit_payloads(
         self,
-        resolved_images: dict[str, dict[str, str]] | None,
+        resolved_images: dict[str, dict[str, str | None]] | None,
         titles: dict[str, str],
         image_types: tuple[str, str, str],
     ):
@@ -138,10 +143,11 @@ class NSIDCService(BaseImageService):
             resolved = resolved_images[image_type]
             yield self.build_payload(
                 image_type,
-                f"{titles[image_type]} {resolved['image_time']}",
+                titles[image_type] + (f" {resolved['image_time']}" if resolved["image_time"] else ""),
                 f"{resolved['image_url']}?ts={int(datetime.now(timezone.utc).timestamp())}",
                 self.sea_ice_today_url,
-        )
+                image_time=resolved["image_time"],
+            )
 
     def fetch(self):
         yield from self.fetch_arctic()

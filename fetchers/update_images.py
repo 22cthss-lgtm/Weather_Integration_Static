@@ -6,6 +6,8 @@ import sys
 
 from src.publication import publish_image
 from src.services.cwa_service import CWAService
+from src.services.cimss_service import CIMSSService
+from src.services.nsidc_service import NSIDCService
 from src.services.kma_service import KMAService
 from src.services.ocean_service import OceanService
 
@@ -19,16 +21,23 @@ PRODUCTS = {
     'tchp': (CWAService, 'fetch_tchp'),
 }
 
+GROUP_PRODUCTS = {
+    'cimss_wind_analysis': (CIMSSService, 'fetch_wind_analysis'),
+    'cimss_steering_flow': (CIMSSService, 'fetch_steering_flow'),
+    'seaice_arctic': (NSIDCService, 'fetch_arctic'),
+    'seaice_antarctic': (NSIDCService, 'fetch_antarctic'),
+}
+
 
 def update_image(image_type, output_root=OUTPUT_ROOT):
-    service_class, method = PRODUCTS[image_type]
+    service_class, method = (GROUP_PRODUCTS if image_type in GROUP_PRODUCTS else PRODUCTS)[image_type]
     service = service_class()
 
     def verified_payloads():
         for payload in getattr(service, method)():
-            # SST already checks the image response in its resolver. The other
-            # services may only have read a metadata page or JavaScript file.
-            if image_type != 'sst' and not service.image_exists(payload.image_url):
+            # SST and group Services verify image responses in their resolvers.
+            # The other Services may only have read metadata pages or scripts.
+            if image_type != 'sst' and image_type not in GROUP_PRODUCTS and not service.image_exists(payload.image_url):
                 raise RuntimeError(f'{image_type}: image URL did not return an image')
             yield payload
 
@@ -40,11 +49,12 @@ def main(argv=None):
     parser.add_argument('types', nargs='*', help='Product names; default: all registered products')
     parser.add_argument('--output-root', type=Path, default=OUTPUT_ROOT)
     args = parser.parse_args(argv)
-    unknown = set(args.types) - PRODUCTS.keys()
+    registered = PRODUCTS | GROUP_PRODUCTS
+    unknown = set(args.types) - registered.keys()
     if unknown:
         parser.error(f'Unknown products: {", ".join(sorted(unknown))}')
     failed = False
-    for kind in dict.fromkeys(args.types or PRODUCTS):
+    for kind in dict.fromkeys(args.types or registered):
         try:
             data = update_image(kind, args.output_root)
             print(f'{kind}: updated; image_time={data["image_time"]}; fetched_at={data["fetched_at"]}')

@@ -1,5 +1,8 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5174";
-const STATIC_IMAGE_TYPES = new Set(["sst", "temperature", "weather_chart", "850hpa", "tchp"]);
+const STATIC_IMAGE_TYPES = new Set([
+  "sst", "temperature", "weather_chart", "850hpa", "tchp",
+  "cimss_wind_analysis", "cimss_steering_flow", "seaice_arctic", "seaice_antarctic",
+]);
 
 export async function fetchLatestImage(type) {
   if (STATIC_IMAGE_TYPES.has(type)) {

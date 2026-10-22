@@ -7,7 +7,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-test.each(["sst", "temperature", "weather_chart", "850hpa", "tchp"].flatMap(type =>
+test.each(["sst", "temperature", "weather_chart", "850hpa", "tchp", "cimss_wind_analysis", "cimss_steering_flow", "seaice_arctic", "seaice_antarctic"].flatMap(type =>
   ["/", "/weather-static/"].map(base => [type, base])
 ))("%s reads static JSON under base %s", async (type, base) => {
   vi.stubEnv("BASE_URL", base);
@@ -18,7 +18,7 @@ test.each(["sst", "temperature", "weather_chart", "850hpa", "tchp"].flatMap(type
   expect(request).toHaveBeenCalledExactlyOnceWith(`${base}data/images/${type}/latest.json`, { cache: "no-cache" });
 });
 
-test.each(["sst", "temperature", "weather_chart", "850hpa", "tchp"])("missing %s JSON fails without falling back to Flask", async (type) => {
+test.each(["sst", "temperature", "weather_chart", "850hpa", "tchp", "cimss_wind_analysis", "cimss_steering_flow", "seaice_arctic", "seaice_antarctic"])("missing %s JSON fails without falling back to Flask", async (type) => {
   const request = vi.fn().mockResolvedValue(new Response("", { status: 404 }));
   vi.stubGlobal("fetch", request);
   await expect(fetchLatestImage(type)).rejects.toThrow(type);

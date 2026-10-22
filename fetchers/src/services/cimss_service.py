@@ -29,7 +29,8 @@ class CIMSSService(BaseImageService):
             re.IGNORECASE,
         ),
         re.compile(
-            r"(?P<year>\d{4})[-/](?P<month>\d{2})[-/](?P<day>\d{2})\s+(?P<hour>\d{2}):(?P<minute>\d{2})"
+            r"(?P<year>\d{4})[-/](?P<month>\d{2})[-/](?P<day>\d{2})\s+(?P<hour>\d{2}):(?P<minute>\d{2})\s*(?:UTC|Z)\b",
+            re.IGNORECASE,
         ),
     )
     month_lookup = {
@@ -84,6 +85,7 @@ class CIMSSService(BaseImageService):
             return None
 
     def fetch_image_response(self, image_url: str) -> requests.Response | None:
+        response = None
         try:
             response = requests.get(
                 image_url,
@@ -92,8 +94,13 @@ class CIMSSService(BaseImageService):
                 params={"_": self.cache_buster()},
             )
             response.raise_for_status()
+            if not response.content or not (response.headers.get('Content-Type') or '').lower().startswith('image/'):
+                response.close()
+                return None
             return response
         except requests.RequestException:
+            if response is not None:
+                response.close()
             return None
 
     def extract_image_time_from_bytes(self, image_bytes: bytes) -> str | None:
@@ -110,7 +117,7 @@ class CIMSSService(BaseImageService):
                 hour=int(utc_match.group("hour")),
                 minute=0,
             )
-            return parsed.strftime("%Y-%m-%d %H:%M")
+            return parsed.replace(tzinfo=timezone.utc).isoformat()
 
         iso_match = self.embedded_time_patterns[1].search(text)
         if iso_match is not None:
@@ -121,7 +128,7 @@ class CIMSSService(BaseImageService):
                 hour=int(iso_match.group("hour")),
                 minute=int(iso_match.group("minute")),
             )
-            return parsed.strftime("%Y-%m-%d %H:%M")
+            return parsed.replace(tzinfo=timezone.utc).isoformat()
 
         return None
 
@@ -133,20 +140,18 @@ class CIMSSService(BaseImageService):
         parsed = parsedate_to_datetime(last_modified)
         if parsed.tzinfo is not None:
             parsed = parsed.astimezone(timezone.utc)
-        return parsed.strftime("%Y-%m-%d %H:%M")
+        return parsed.replace(tzinfo=timezone.utc).isoformat()
 
     def resolve_image_time(self, response: requests.Response) -> str | None:
-        image_time = self.extract_image_time_from_bytes(response.content)
-        if image_time is not None:
-            return image_time
-        return self.extract_image_time_from_headers(response)
+        # HTTP Last-Modified describes a file update, not a product time.
+        return self.extract_image_time_from_bytes(response.content)
 
-    def resolve_latest_wind_analysis_images(self) -> dict[str, dict[str, str]] | None:
+    def resolve_latest_wind_analysis_images(self) -> dict[str, dict[str, str | None]] | None:
         page_html = self.fetch_page_html()
         if page_html is None or "westpac/winds/wgmsshr.GIF" not in page_html:
             return None
 
-        resolved_images: dict[str, dict[str, str]] = {}
+        resolved_images: dict[str, dict[str, str | None]] = {}
         image_map = {
             "cimss_wind_shear": self.shear_image_url,
             "cimss_850mb_vorticity": self.vorticity_image_url,
@@ -158,8 +163,6 @@ class CIMSSService(BaseImageService):
                 return None
             try:
                 image_time = self.resolve_image_time(response)
-                if image_time is None:
-                    return None
                 resolved_images[image_type] = {
                     "image_url": f"{image_url}?ts={self.cache_buster()}",
                     "image_time": image_time,
@@ -169,7 +172,7 @@ class CIMSSService(BaseImageService):
 
         return resolved_images
 
-    def resolve_latest_steering_flow_images(self) -> dict[str, dict[str, str]] | None:
+    def resolve_latest_steering_flow_images(self) -> dict[str, dict[str, str | None]] | None:
         page_html = self.fetch_specific_page_html(self.steering_flow_page_url)
         if page_html is None:
             return None
@@ -177,7 +180,7 @@ class CIMSSService(BaseImageService):
         if "wgmsdlm1.GIF" not in page_html and "prod=dlm1" not in page_html:
             return None
 
-        resolved_images: dict[str, dict[str, str]] = {}
+        resolved_images: dict[str, dict[str, str | None]] = {}
 
         for image_type, _, image_name in self.steering_flow_layers:
             image_url = f"https://tropic.ssec.wisc.edu/real-time/westpac/winds/{image_name}"
@@ -186,8 +189,6 @@ class CIMSSService(BaseImageService):
                 return None
             try:
                 image_time = self.resolve_image_time(response)
-                if image_time is None:
-                    return None
                 resolved_images[image_type] = {
                     "image_url": f"{image_url}?ts={self.cache_buster()}",
                     "image_time": image_time,
@@ -210,9 +211,10 @@ class CIMSSService(BaseImageService):
             resolved = resolved_images[image_type]
             yield self.build_payload(
                 image_type,
-                f"{titles[image_type]} {resolved['image_time']}",
+                titles[image_type] + (f" {resolved['image_time']}" if resolved["image_time"] else ""),
                 resolved["image_url"],
                 self.source_page_url,
+                image_time=resolved["image_time"],
             )
 
     def fetch_steering_flow(self):
@@ -224,9 +226,10 @@ class CIMSSService(BaseImageService):
             resolved = resolved_images[image_type]
             yield self.build_payload(
                 image_type,
-                f"CIMSS Steering Flow {layer_label} {resolved['image_time']}",
+                f"CIMSS Steering Flow {layer_label}" + (f" {resolved['image_time']}" if resolved["image_time"] else ""),
                 resolved["image_url"],
                 self.steering_flow_page_url,
+                image_time=resolved["image_time"],
             )
 
     def fetch(self):
