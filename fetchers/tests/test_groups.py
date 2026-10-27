@@ -119,8 +119,10 @@ class GroupPublicationTests(unittest.TestCase):
         import update_images as runner
         with patch.object(runner, 'update_image', side_effect=[RuntimeError('partial'),
                           {'image_time': None, 'fetched_at': '2026-10-22T08:00:00+00:00'}]) as update:
-            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                result = runner.main(['cimss_wind_analysis', 'seaice_arctic'])
+            with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+                with patch('src.update_runner.runtime_directory', return_value=Path(directory) / '.runtime'), \
+                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    result = runner.main(['cimss_wind_analysis', 'seaice_arctic'])
         self.assertEqual(result, 1)
         self.assertEqual(update.call_count, 2)
 

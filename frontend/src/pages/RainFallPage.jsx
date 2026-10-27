@@ -1,3 +1,4 @@
+import { formatImageDate, formatImageTime, formatImageTitle } from "../image-time";
 import { useEffect, useState } from "react";
 import { fetchDailyImages, fetchRainfallTop } from "../api";
 import useCurrentImage, { taipeiDate } from "../useCurrentImage";
@@ -75,17 +76,19 @@ export default function RainFallPage() {
     return () => { active = false; };
   }, [selectedMetric]);
 
+  const previousDailyImages = rainfallDailyImages.filter(entry => entry.label === "昨日" || entry.label === "前日");
+
   return (
     <section>
       {image ? <>
-      <h2>{selectedRainfall.title}</h2>
+      <h2>{formatImageTitle(selectedRainfall)}</h2>
       <div className="image-meta-row">
         <p>Source: {selectedRainfall.source}</p>
         <a className="source-link" href={selectedRainfall.source_url} target="_blank" rel="noreferrer">
           Original source
             </a>
       </div>
-      <p>{selectedRainfall.image_time ? `Image Time: ${selectedRainfall.image_time}` : `Fetched At: ${selectedRainfall.fetched_at}`}</p>
+      <p>{selectedRainfall.image_time ? `Image Time: ${formatImageTime(selectedRainfall.image_time)}` : `Fetched At: ${formatImageTime(selectedRainfall.fetched_at)}`}</p>
       </> : <p>{error || "Loading..."}</p>}
       <div className="detail-layout">
         {image ? <>
@@ -99,7 +102,7 @@ export default function RainFallPage() {
             >
               {rainfallHistory.map((entry) => (
                 <option value={entry.image_time} key={`${entry.image_type}-${entry.image_time}`}>
-                  {entry.image_time}
+                  {formatImageTime(entry.image_time)}
                 </option>
               ))}
             </select>
@@ -110,13 +113,13 @@ export default function RainFallPage() {
         </div>
         <SourceImage image={selectedRainfall} />
         </> : null}
-        {rainfallDailyImages.length ? (
+        {previousDailyImages.length ? (
           <section className="rainfall-daily-section" aria-label="Daily rainfall representatives">
             <div className="rainfall-daily-grid">
-              {rainfallDailyImages.map((entry) => (
+              {previousDailyImages.map((entry) => (
                 <article className="image-panel rainfall-daily-card" key={`${entry.label}-${entry.image_time}`}>
-                  <p>{entry.label} {entry.represented_date}</p>
-                  <SourceImage image={entry} className="detail-image rainfall-daily-image" alt={`${entry.label} ${entry.represented_date}`} />
+                  <p>{entry.label} {formatImageDate(entry.represented_date)}</p>
+                  <SourceImage image={entry} className="detail-image rainfall-daily-image" alt={`${entry.label} ${formatImageDate(entry.represented_date)}`} />
                 </article>
               ))}
             </div>

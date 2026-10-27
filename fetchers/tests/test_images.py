@@ -164,7 +164,9 @@ class WriterTests(unittest.TestCase):
                     raise RuntimeError('unavailable')
                 return {'image_time': None, 'fetched_at': '2026-10-22T00:00:00+00:00'}
             errors = io.StringIO()
-            with patch.object(runner, 'update_image', side_effect=update), redirect_stderr(errors), redirect_stdout(io.StringIO()):
+            with patch.object(runner, 'update_image', side_effect=update), \
+                 patch('src.update_runner.runtime_directory', return_value=Path(directory) / '.runtime'), \
+                 redirect_stderr(errors), redirect_stdout(io.StringIO()):
                 code = runner.main(['temperature', '850hpa', '--output-root', directory])
             self.assertEqual(code, 1)
             self.assertEqual(calls, ['temperature', '850hpa'])

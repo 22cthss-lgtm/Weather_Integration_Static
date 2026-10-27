@@ -5,6 +5,7 @@ import sys
 
 from src.services.ocean_service import OceanService
 from src.publication import publish_image
+from src.update_runner import UpdateInProgress, run_batch
 
 
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "frontend/public/data/images/sst/latest.json"
@@ -16,12 +17,10 @@ def update_sst(output_path: Path = OUTPUT_PATH) -> dict:
 
 def main() -> int:
     try:
-        data = update_sst()
-    except Exception as exc:
-        print(f"SST update failed; previous JSON was preserved: {exc}", file=sys.stderr)
+        return run_batch(['sst'], OUTPUT_PATH.parent.parent, lambda kind, root: update_sst())
+    except UpdateInProgress:
+        print('Another update is already running for this output directory.', file=sys.stderr)
         return 1
-    print(f"Updated {OUTPUT_PATH}\nProduct date: {data['image_time']}\nFetched at: {data['fetched_at']}")
-    return 0
 
 
 if __name__ == "__main__":

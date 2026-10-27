@@ -1,3 +1,4 @@
+import { formatImageTime, formatImageTitle } from "../image-time";
 import useCurrentImage from "../useCurrentImage";
 import SourceImage from "../SourceImage";
 
@@ -9,10 +10,10 @@ export default function SatellitePage() {
 
   return (
     <section>
-      <h2>{selectedSatellite.title}</h2>
+      <h2>{formatImageTitle(selectedSatellite)}</h2>
       <div className="image-meta-row">
         <p>Source: {selectedSatellite.source}</p>
-        <p>{selectedSatellite.image_time ? `Image Time: ${selectedSatellite.image_time}` : `Fetched At: ${selectedSatellite.fetched_at}`}</p>
+        <p>{selectedSatellite.image_time ? `Image Time: ${formatImageTime(selectedSatellite.image_time)}` : `Fetched At: ${formatImageTime(selectedSatellite.fetched_at)}`}</p>
       </div>
       <div className="detail-layout">
         <div className="controls">
@@ -25,7 +26,7 @@ export default function SatellitePage() {
             >
               {satelliteHistory.map((entry) => (
                 <option value={entry.image_time} key={`${entry.image_type}-${entry.image_time}`}>
-                  {entry.image_time}
+                  {formatImageTime(entry.image_time)}
                 </option>
               ))}
             </select>

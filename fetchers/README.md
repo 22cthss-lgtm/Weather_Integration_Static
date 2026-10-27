@@ -247,3 +247,111 @@ daily 抓取與顯示不依賴 latest/history 成功。
 
 測試使用 unittest 與 Vitest，包含真實 public 輸出整合測試。
 不會把測試模擬資料寫入 public。新輸出需先以 Fetcher 成功產生。
+
+
+## 第七階段：本機持續自動更新
+
+### 使用方式：兩個 PowerShell 視窗
+
+第一個視窗執行既有前端：
+
+```powershell
+cd C:\Weather_Integration_Static\frontend
+npm run dev
+```
+
+第二個視窗啟動本機更新程式（依既有環境也可將 python 換成 .venv 的 Python）：
+
+```powershell
+cd C:\Weather_Integration_Static
+python -B fetchers/watch_images.py
+```
+
+啟動後立即更新全部已註冊的圖資與雨量排行。每一輪完成後等待10分鐘，
+然後再更新；單輪執行時間不包含在等待時間內，所以不保證每個整10分準時執行。
+更新程式持續運作時，你重新整理本機網站就會讀到最近成功產生的 JSON，
+不是每次刷新才向官方抓取；圖片／觀測時間也可能早於抓取成功時間。
+Vite 開發伺服器直接提供 public 資料，因此不需要每輪 build。
+
+保持兩個視窗運作；在更新程式視窗按 Ctrl+C 可停止。
+電腦休眠、關機或關閉該視窗後，更新不會繼續。本程式不會註冊開機啟動，
+也沒有安裝 Windows 排程工作、Codex 自動化、GitHub Actions 或 Pages 設定。
+本次驗證只執行有終點的測試，沒有替你留下背景常駐程序。
+
+### 調整間隔、選擇圖資及單次執行
+
+```powershell
+# 全部資源，每輪完成後等待5分鐘
+python -B fetchers/watch_images.py --interval-minutes 5
+
+# 只更新較頻繁變動的四種資料，每輪完成後等待10分鐘
+python -B fetchers/watch_images.py radar satellite rainfall rainfall_rankings --interval-minutes 10
+
+# 只跑一輪後退出（不會留在背景）
+python -B fetchers/watch_images.py --once
+
+# 有限輪數供維護驗證使用
+python -B fetchers/watch_images.py temperature --interval-minutes 0.1 --max-cycles 2
+```
+
+預設全部資源採相同等待間隔，這是可設定的本機輪詢週期，不代表官方產品發布頻率。
+較長週期的產品可能多次成功抓到同一產品日期。程式不會改變原 Service 的發布延遲、
+圖片解析或當日掃描策略；目前當日時次仍會重新驗證候選圖片。
+選擇子集合時，未選產品不會自動更新。較短間隔會增加來源請求量。
+
+既有單次入口仍可使用，未來 CI 可繼續呼叫它，不需要把常駐迴圈搬到雲端：
+
+```powershell
+python -B fetchers/update_images.py radar satellite rainfall rainfall_rankings
+```
+
+兩個入口共用 src/update_runner.py 的 run_batch、相同更新方法與互斥鎖。
+舊 update_sst.py 命令也接上同一個鎖定入口。使用者可在常駐等待期間執行單次更新，
+但同一輸出目錄只允許一批正在抓取／寫檔；衝突的單次命令會退出，
+常駐程式遇到衝突則跳過當輪、下輪再試。不能同時啟動兩個相同輸出目錄的常駐程式。
+
+### 更新紀錄與錯誤處理
+
+```powershell
+# 查看最後一批結果及目前是否真的有程式持有執行鎖；不抓取資料
+python -B fetchers/watch_images.py --status
+```
+
+預設私人狀態檔：`.runtime/updater/status.json`。
+.runtime 已被 Git 忽略，且位於 public 外，不會隨 Vite build 發布。
+內容包括：state、mode、pid、started_at、finished_at、next_run_at、selected_products、
+last_batch_state，以及各圖資的最近嘗試、完成、最後成功時間與圖片／抓取時間。
+時間採含 +00:00 的 UTC。檢視命令也檢查 OS 鎖，不把上次意外結束留下的 running
+文字誤當成目前仍在執行。last_success_at 是該圖資更新方法完整成功的時間；
+部分資源成功但方法整體回報未完成時，不冒稱整項已成功。
+
+- running：目前正在執行一批；各資源也會顯示 running／success／failed。
+- waiting：常駐程式等待下一輪，next_run_at 為預計時間。
+- stopped：正常停止或 Ctrl+C；最後一批結果另看 last_batch_state。
+- 單次批次結果為 success／partial_failure／failed，退出碼為0／1。
+- Ctrl+C 退出碼為130；若在某個資源執行中停止，該資源記為 interrupted。
+
+某項來源失敗不會中斷其他項；常駐模式下一輪會再試。
+既有 JSON 仍由原 Fetcher 驗證與原子寫檔保護，狀態檔也沿用共用原子 writer。
+狀態檔只放可控結果碼與時間，不寫入來源例外、原始回應、請求網址或 API Key。
+終端錯誤使用通用訊息，避免帶有 Authorization 的來源例外被印出。
+
+update.lock 用於單批互斥；watch.lock 用於常駐生命週期互斥。
+OS 在程序退出或崩潰時自動釋放鎖；檔案保留存在是正常的，不需要手動刪除。
+--output-root 可指定不同輸出目錄，其鎖與狀態隔離在 .runtime/updater 下的雜湊子目錄。
+
+### 之後搬到 GitHub 的界線
+
+單次抓取、驗證、JSON契約與失敗保留邏輯共用；雲端排程只需呼叫單次入口。
+但 GitHub 執行前仍須恢復上一份成功資料快照、以秘密設定提供 Key，並接上
+網站 build／部署與跨輪資料持久保存，不能把全新 runner 的檔案當成上次成功資料。
+目前沒有實作這些雲端部分，也沒有自動 commit 或 push。
+
+
+### Windows 狀態檔暫時被占用
+
+私人 status.json 的原子替換若碰到 Windows 讀取占用，會短暫重試。
+持續無法寫入狀態時，終端會警告狀態可能過期，但本輪其餘圖資及後續更新仍會繼續。
+若無法讀取既有狀態，也會繼續更新圖資，並跳過該輪狀態寫入，保留原有成功紀錄。
+這項處理只用於私人執行紀錄，不會忽略圖資 JSON 的驗證或寫入失敗。
+更新程式碼後，既有 Python 常駐程序需要 Ctrl+C 停止，再執行原指令才會載入修正。

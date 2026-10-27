@@ -66,6 +66,7 @@ htmlcov/
 .coverage.*
 
 # Logs and temporary files
+.runtime/
 *.log
 *.tmp
 *.temp

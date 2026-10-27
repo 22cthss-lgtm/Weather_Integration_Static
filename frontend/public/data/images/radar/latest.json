@@ -1,9 +1,9 @@
 {
   "image_type": "radar",
   "source": "CWA",
-  "title": "CWA Radar Echo 2026-10-22 19:10",
-  "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610221910.png",
+  "title": "CWA Radar Echo 2026-10-27 19:10",
+  "image_url": "https://www.cwa.gov.tw/Data/radar/CV1_3600_202610271910.png",
   "source_url": "https://www.cwa.gov.tw/V8/C/W/OBS_Radar.html",
-  "fetched_at": "2026-10-22T11:27:46.709346+00:00",
-  "image_time": "2026-10-22T19:10:00+08:00"
+  "fetched_at": "2026-10-27T11:23:11.757293+00:00",
+  "image_time": "2026-10-27T19:10:00+08:00"
 }

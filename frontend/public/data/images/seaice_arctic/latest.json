@@ -2,36 +2,36 @@
   "image_type": "seaice_arctic",
   "source": "NSIDC",
   "title": "NSIDC Arctic Sea Ice Extent",
-  "image_url": "https://nsidc.org/data/seaice_index/images/daily_images/N_daily_extent_hires.png?ts=1792663063",
+  "image_url": "https://nsidc.org/data/seaice_index/images/daily_images/N_daily_extent_hires.png?ts=1793100185",
   "source_url": "https://nsidc.org/sea-ice-today",
-  "fetched_at": "2026-10-22T09:57:43.540267+00:00",
+  "fetched_at": "2026-10-27T11:23:05.907719+00:00",
   "image_time": null,
   "images": [
     {
       "image_type": "seaice_arctic_extent",
       "source": "NSIDC",
       "title": "NSIDC Arctic Sea Ice Extent",
-      "image_url": "https://nsidc.org/data/seaice_index/images/daily_images/N_daily_extent_hires.png?ts=1792663063",
+      "image_url": "https://nsidc.org/data/seaice_index/images/daily_images/N_daily_extent_hires.png?ts=1793100185",
       "source_url": "https://nsidc.org/sea-ice-today",
-      "fetched_at": "2026-10-22T09:57:43.540267+00:00",
+      "fetched_at": "2026-10-27T11:23:05.907719+00:00",
       "image_time": null
     },
     {
       "image_type": "seaice_arctic_concentration",
       "source": "NSIDC",
       "title": "NSIDC Arctic Sea Ice Concentration",
-      "image_url": "https://nsidc.org/data/seaice_index/images/daily_images/N_daily_concentration_hires.png?ts=1792663063",
+      "image_url": "https://nsidc.org/data/seaice_index/images/daily_images/N_daily_concentration_hires.png?ts=1793100185",
       "source_url": "https://nsidc.org/sea-ice-today",
-      "fetched_at": "2026-10-22T09:57:43.540303+00:00",
+      "fetched_at": "2026-10-27T11:23:05.907774+00:00",
       "image_time": null
     },
     {
       "image_type": "seaice_arctic_timeseries",
       "source": "NSIDC",
       "title": "NSIDC Arctic Sea Ice Extent Time Series",
-      "image_url": "https://nsidc.org/data/seaice_index/images/daily_images/N_iqr_timeseries.png?ts=1792663063",
+      "image_url": "https://nsidc.org/data/seaice_index/images/daily_images/N_iqr_timeseries.png?ts=1793100185",
       "source_url": "https://nsidc.org/sea-ice-today",
-      "fetched_at": "2026-10-22T09:57:43.540317+00:00",
+      "fetched_at": "2026-10-27T11:23:05.907804+00:00",
       "image_time": null
     }
   ]

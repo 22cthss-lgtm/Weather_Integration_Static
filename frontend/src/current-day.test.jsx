@@ -48,6 +48,11 @@ test.each(["radar", "satellite", "rainfall"])("%s opens latest, switches current
   const select = screen.getByRole("combobox");
   expect(select.value).toBe(latest.image_time);
   expect(within(select).getAllByRole("option")).toHaveLength(2);
+  expect(within(select).getAllByRole("option").map(option => option.textContent.trim())).toEqual([
+    type === "rainfall" ? "2026/10/22 00:30" : "2026/10/22 00:00", "2026/10/22 01:00",
+  ]);
+  expect(screen.getByText("Image Time: 2026/10/22 01:00")).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 2 }).textContent).toContain("2026/10/22 01:00");
   fireEvent.change(select, { target: { value: first.image_time } });
   expect(screen.getByAltText(first.title).getAttribute("src")).toBe(first.image_url);
   expect(request.mock.calls.every(([url]) => !url.includes("/api/"))).toBe(true);
@@ -72,9 +77,12 @@ test("history fetch failure preserves latest image and reports the panel error",
 test("official rainfall daily dates and all original eight ranking tabs remain usable", async () => {
   serve("rainfall");
   render(<MemoryRouter initialEntries={["/images/rainfall"]}><App /></MemoryRouter>);
-  await screen.findByAltText("今日 2026-10-22");
-  expect(screen.getByAltText("昨日 2026-10-21")).toBeTruthy();
-  expect(screen.getByAltText("前日 2026-10-20")).toBeTruthy();
+  await screen.findByAltText("昨日 2026/10/21");
+  expect(screen.queryByAltText(/今日 2026/)).toBeNull();
+  expect(screen.getByAltText("前日 2026/10/20")).toBeTruthy();
+  const daily = screen.getByRole("region", { name: "Daily rainfall representatives" });
+  expect(within(daily).getAllByRole("img")).toHaveLength(2);
+  expect(within(daily).getByText("昨日 2026/10/21")).toBeTruthy();
   const metrics = ["10min", "1hr", "3hr", "6hr", "12hr", "24hr", "1day", "2days"];
   const tabs = screen.getAllByRole("tab");
   expect(tabs).toHaveLength(8);
@@ -99,6 +107,6 @@ test("rainfall daily images and ranking still render if latest image metadata fa
   vi.stubGlobal("fetch", async url => url === "/data/images/rainfall/latest.json"
     ? { ok: false, json: async () => ({}) } : request(url));
   render(<MemoryRouter initialEntries={["/images/rainfall"]}><App /></MemoryRouter>);
-  expect(await screen.findByAltText("昨日 2026-10-21")).toBeTruthy();
+  expect(await screen.findByAltText("昨日 2026/10/21")).toBeTruthy();
   expect(await screen.findByText("Station 10min")).toBeTruthy();
 });

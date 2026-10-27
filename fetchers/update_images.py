@@ -12,6 +12,7 @@ from src.services.kma_service import KMAService
 from src.services.ocean_service import OceanService
 from src.current_day import CURRENT_PRODUCTS, update_current_product
 from src.rainfall_rankings import update_rankings
+from src.update_runner import UpdateInProgress, run_batch
 
 
 OUTPUT_ROOT = Path(__file__).resolve().parent.parent / 'frontend/public/data/images'
@@ -50,6 +51,10 @@ def update_image(image_type, output_root=OUTPUT_ROOT):
     return publish_image(image_type, verified_payloads(), Path(output_root) / image_type / 'latest.json')
 
 
+def registered_products():
+    return PRODUCTS | GROUP_PRODUCTS | dict.fromkeys((*CURRENT_PRODUCTS, 'rainfall_rankings'))
+
+
 def main(argv=None):
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent.parent / '.env', encoding='utf-8-sig')
@@ -57,21 +62,15 @@ def main(argv=None):
     parser.add_argument('types', nargs='*', help='Product names; default: all registered products')
     parser.add_argument('--output-root', type=Path, default=OUTPUT_ROOT)
     args = parser.parse_args(argv)
-    registered = PRODUCTS | GROUP_PRODUCTS | dict.fromkeys((*CURRENT_PRODUCTS, 'rainfall_rankings'))
+    registered = registered_products()
     unknown = set(args.types) - registered.keys()
     if unknown:
         parser.error(f'Unknown products: {", ".join(sorted(unknown))}')
-    failed = False
-    for kind in dict.fromkeys(args.types or registered):
-        try:
-            data = update_image(kind, args.output_root)
-            print(f'{kind}: updated; image_time={data.get("image_time")}; fetched_at={data["fetched_at"]}')
-        except Exception as exc:
-            failed = True
-            message = ('update incomplete; successful resources kept; failed resources preserved'
-                       if kind in CURRENT_PRODUCTS else 'update failed; previous JSON preserved')
-            print(f'{kind}: {message}: {exc}', file=sys.stderr)
-    return int(failed)
+    try:
+        return run_batch(list(dict.fromkeys(args.types or registered)), args.output_root, update_image)
+    except UpdateInProgress:
+        print('Another update is already running for this output directory.', file=sys.stderr)
+        return 1
 
 
 if __name__ == '__main__':

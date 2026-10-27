@@ -1,3 +1,4 @@
+import { formatImageDate } from "./image-time";
 import { useEffect, useState } from "react";
 import { fetchCurrentImageHistory, fetchLatestImage } from "./api";
 
@@ -58,6 +59,6 @@ export default function useCurrentImage(type) {
   return { image, error, history: isToday ? history : [], selectedTime, setSelectedTime,
     selected: (isToday && history.find(entry => entry.image_time === selectedTime)) || image,
     status: image && !isToday
-      ? `當日資料尚未取得；目前顯示 ${taipeiDate(image.image_time)} 的最新成功圖片（台北時間）。`
+      ? `當日資料尚未取得；目前顯示 ${formatImageDate(image.image_time)} 的最新成功圖片（台北時間）。`
       : status || `${history.length} images available for this date.` };
 }
