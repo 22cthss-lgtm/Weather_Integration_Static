@@ -1,6 +1,7 @@
 """Current-day inventories and official CWA single-day rainfall products."""
 
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import json
@@ -43,7 +44,8 @@ def publish_current_history(service, latest, output_root, now=None):
 
     # Independent URL checks only; merge and write once on the calling thread.
     with ThreadPoolExecutor(max_workers=6) as pool:
-        results = list(pool.map(probe, slots))
+        contexts = [(copy_context(), slot) for slot in slots]
+        results = list(pool.map(lambda pair: pair[0].run(probe, pair[1]), contexts))
     successes = [item for _, item, status in results if status is None]
     if not successes:
         raise RuntimeError(f'{kind}: no verified slots; previous history preserved')

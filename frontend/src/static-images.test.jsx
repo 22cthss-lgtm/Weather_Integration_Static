@@ -6,6 +6,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import DashboardPage from "./pages/DashboardPage";
 import ImagePage from "./pages/ImagePage";
+import { formatImageTime } from "./image-time";
 
 const types = ["temperature", "weather_chart", "850hpa", "tchp"];
 // Real outputs are deliberately required: a successful live update precedes this suite.
@@ -38,7 +39,7 @@ test("Dashboard renders all four real resources", async () => {
     const card = image.closest("a");
     expect(card.getAttribute("href")).toBe(`/images/${type}`);
     expect(within(card).getByText(product.image_time
-      ? `Image Time: ${product.image_time}` : `Fetched At: ${product.fetched_at}`)).toBeTruthy();
+      ? `Image Time: ${formatImageTime(product.image_time)}` : `Fetched At: ${formatImageTime(product.fetched_at)}`)).toBeTruthy();
     expect(request.mock.calls.some(([url]) => url.includes(`type=${type}`))).toBe(false);
   }
 });

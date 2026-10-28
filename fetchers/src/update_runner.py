@@ -10,6 +10,7 @@ import sys
 import time
 
 from .publication import atomic_write_json
+from .http_client import http_scope
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / 'frontend/public/data/images'
@@ -123,7 +124,7 @@ def run_batch(types, output_root, update, runtime_dir=None, *, mode='once'):
     types = list(dict.fromkeys(types))
     if not types:
         raise ValueError('At least one product is required')
-    with FileLock(runtime_dir / 'update.lock'):
+    with FileLock(runtime_dir / 'update.lock'), http_scope():
         report = read_status_safely(runtime_dir)
         can_save = report is not None
         if report is None:

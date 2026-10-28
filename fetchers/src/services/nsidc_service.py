@@ -4,6 +4,8 @@ import re
 
 import requests
 
+from ..http_client import http_get
+
 from .base import BaseImageService
 
 
@@ -30,7 +32,7 @@ class NSIDCService(BaseImageService):
 
     def fetch_page_html(self) -> str | None:
         try:
-            response = requests.get(
+            response = http_get(
                 self.sea_ice_today_url,
                 timeout=20,
                 headers=self.no_cache_headers(),
@@ -44,7 +46,7 @@ class NSIDCService(BaseImageService):
     def fetch_image_response(self, image_url: str) -> requests.Response | None:
         response = None
         try:
-            response = requests.get(
+            response = http_get(
                 image_url,
                 timeout=20,
                 headers=self.no_cache_headers(),

@@ -3,6 +3,8 @@ import re
 from zoneinfo import ZoneInfo
 
 import requests
+
+from ..http_client import http_get
 import urllib3
 
 from .base import BaseImageService
@@ -61,7 +63,7 @@ class CWAService(BaseImageService):
 
     def image_exists(self, image_url: str) -> bool:
         try:
-            response = requests.get(
+            response = http_get(
                 image_url,
                 timeout=5,
                 stream=True,
@@ -78,7 +80,7 @@ class CWAService(BaseImageService):
     def check_image_url(self, image_url: str) -> bool:
         """Distinguish absent slots (404/410) from transient source failures."""
         try:
-            with requests.get(image_url, timeout=15, stream=True,
+            with http_get(image_url, timeout=15, stream=True,
                               headers=self.no_cache_headers(), verify=False) as response:
                 if response.status_code in (404, 410):
                     return False
@@ -93,7 +95,7 @@ class CWAService(BaseImageService):
 
     def fetch_rainfall_day_script(self) -> str:
         try:
-            with requests.get(f'{self.cwa_base_url}/Data/js/rainfall/RainfallImg_Day.js',
+            with http_get(f'{self.cwa_base_url}/Data/js/rainfall/RainfallImg_Day.js',
                               timeout=20, headers=self.no_cache_headers(), verify=False) as response:
                 response.raise_for_status()
                 return response.text
@@ -183,7 +185,7 @@ class CWAService(BaseImageService):
         
     def resolve_radar_image_url(self) -> tuple[str, str] | None:
         try:
-            response = requests.get(self.radar_data_url, timeout=10, verify=False)
+            response = http_get(self.radar_data_url, timeout=10, verify=False)
             response.raise_for_status()
             match = self.radar_data_regex.search(response.text)
             if match:
@@ -195,7 +197,7 @@ class CWAService(BaseImageService):
             pass
 
         try:
-            response = requests.get(self.radar_source_url, timeout=10, verify=False)
+            response = http_get(self.radar_source_url, timeout=10, verify=False)
             response.raise_for_status()
             match = self.radar_image_regex.search(response.text)
             if match:
@@ -262,7 +264,7 @@ class CWAService(BaseImageService):
 
     def resolve_temperature_image_url(self) -> tuple[str, str] | None:
         try:
-            response = requests.get(
+            response = http_get(
                 self.temperature_source_url,
                 timeout=10,
                 headers=self.no_cache_headers(),
@@ -305,7 +307,7 @@ class CWAService(BaseImageService):
 
     def resolve_rainfall_image_url(self) -> tuple[str, str] | None:
         try:
-            response = requests.get(
+            response = http_get(
                 self.rainfall_source_url,
                 timeout=10,
                 headers=self.no_cache_headers(),
@@ -386,7 +388,7 @@ class CWAService(BaseImageService):
 
     def resolve_weather_chart_image_url(self) -> tuple[str, str | None] | None:
         try:
-            response = requests.get(
+            response = http_get(
                 self.weather_chart_source_url,
                 timeout=10,
                 headers=self.no_cache_headers(),
@@ -429,7 +431,7 @@ class CWAService(BaseImageService):
 
     def resolve_tchp_image_url(self) -> tuple[str, str] | None:
         try:
-            response = requests.get(
+            response = http_get(
                 self.tchp_data_url,
                 timeout=10,
                 headers=self.no_cache_headers(),

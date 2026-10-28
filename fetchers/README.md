@@ -355,3 +355,21 @@ OS 在程序退出或崩潰時自動釋放鎖；檔案保留存在是正常的�
 若無法讀取既有狀態，也會繼續更新圖資，並跳過該輪狀態寫入，保留原有成功紀錄。
 這項處理只用於私人執行紀錄，不會忽略圖資 JSON 的驗證或寫入失敗。
 更新程式碼後，既有 Python 常駐程序需要 Ctrl+C 停止，再執行原指令才會載入修正。
+
+## 8. 受保護的 JSON 快照（部署前準備）
+
+新入口 `python -B fetchers/update_snapshot.py` 先恢復／驗證前一次有效快照，
+在隔離候選目錄更新，再驗證並分類各 JSON；不修改目前本機網站的 public 資料。
+所有既有 Fetcher 入口也已共用 HTTP 有限重試與來源額度，不另包整批重試。
+
+完整說明、來源額度、資源結果、損壞恢復及第二階段保存／部署界線請見
+[Fetcher 資料保護與快照](../docs/fetcher-protection.md)。
+目前沒有建立遠端 `weather-data` 分支或設定 Actions／Pages。
+
+## 9. 手動 Pages 發布準備
+
+本機 `prepare_pages.py pack` 可將指定有效快照打包，供使用者手動上傳 Release，
+再由僅 workflow_dispatch 的 `pages-manual.yml` 下載確切附件／SHA、驗證與建置。
+不執行 Fetcher、不需要 CWA Key、不自動 commit，尚未操作任何線上設定／部署。
+首次傳輸、期限、GitHub 設定與提交清單請見 [手動 Pages 說明](../docs/manual-pages.md)。
+測試用相依套件請安裝 `fetchers/requirements-dev.txt`（沿用 unittest，新增 YAML 驗證）。

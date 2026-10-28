@@ -4,6 +4,8 @@ import math
 from typing import Any
 
 import requests
+
+from ..http_client import http_get
 import urllib3
 
 
@@ -103,7 +105,7 @@ class RainfallObservationService:
 
         fetched_at = datetime.now(timezone.utc).isoformat()
         try:
-            response = requests.get(
+            response = http_get(
                 CWA_RAINFALL_API_URL,
                 params={"Authorization": api_key, "format": "JSON"},
                 timeout=15,

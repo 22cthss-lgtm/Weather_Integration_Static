@@ -1,0 +1,127 @@
+name: Publish validated snapshot to Pages (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_release:
+        description: 'Exact Release tag containing the uploaded snapshot ZIP'
+        required: true
+        type: string
+      snapshot_asset:
+        description: 'Exact ZIP filename (no wildcard)'
+        required: true
+        type: string
+      snapshot_sha256:
+        description: 'SHA-256 printed by prepare_pages.py pack'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-manual
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      snapshot_id: ${{ steps.snapshot.outputs.snapshot_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Require default branch and validate exact input
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ inputs.snapshot_release }}
+          ASSET_NAME: ${{ inputs.snapshot_asset }}
+          ASSET_SHA: ${{ inputs.snapshot_sha256 }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+          python -B fetchers/prepare_pages.py check-inputs --tag "$RELEASE_TAG" --asset "$ASSET_NAME" --sha256 "$ASSET_SHA"
+      - name: Download explicitly selected Release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.snapshot_release }}
+          ASSET_NAME: ${{ inputs.snapshot_asset }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pages-input"
+          gh release download "$RELEASE_TAG" --repo "$GH_REPO" --pattern "$ASSET_NAME" --dir "$RUNNER_TEMP/pages-input"
+      - name: Install Python dependencies
+        run: python -m pip install -r fetchers/requirements-dev.txt
+      - name: Restore and validate snapshot (no fetching)
+        id: snapshot
+        env:
+          ASSET_NAME: ${{ inputs.snapshot_asset }}
+          ASSET_SHA: ${{ inputs.snapshot_sha256 }}
+        run: |
+          python -B fetchers/prepare_pages.py restore --archive "$RUNNER_TEMP/pages-input/$ASSET_NAME" --sha256 "$ASSET_SHA" --destination "$RUNNER_TEMP/pages-data" > "$RUNNER_TEMP/pages-input-result.json"
+          rm -rf frontend/public/data
+          mv "$RUNNER_TEMP/pages-data" frontend/public/data
+          python -c 'import json,os; r=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"pages-input-result.json"))); open(os.environ["GITHUB_OUTPUT"],"a").write("snapshot_id="+r["snapshot_id"]+"\n")'
+      - name: Python tests
+        run: python -B -m unittest discover -s fetchers/tests -v
+      - name: Frontend tests
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test -- --run
+      - name: Read Pages metadata
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Build and verify static Pages routes
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          npm run build:pages --prefix frontend
+          python -B fetchers/verify_pages_build.py --data frontend/public/data --output frontend/dist --base "${PAGES_BASE_PATH%/}/" --manifest "$RUNNER_TEMP/pages-input-result.json"
+      - name: Record selected code and data
+        env:
+          SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot_id }}
+          ASSET_SHA: ${{ inputs.snapshot_sha256 }}
+        run: |
+          printf '## Manual Pages candidate\n\nCode: `%s`\n\nSnapshot: `%s`\n\nInput SHA-256: `%s`\n\n' "$GITHUB_SHA" "$SNAPSHOT_ID" "$ASSET_SHA" >> "$GITHUB_STEP_SUMMARY"
+          python -c 'import json,os; r=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"pages-input-result.json"))); open(os.environ["GITHUB_STEP_SUMMARY"],"a").write("Known incomplete histories: "+str(len(r["incomplete_history"]))+"\n")'
+      - name: Upload validated website only
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: frontend/dist
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Refuse an older queued run after a newer successful run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CURRENT_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          newer=$(gh api --method GET --paginate "repos/$GH_REPO/actions/workflows/pages-manual.yml/runs?event=workflow_dispatch&per_page=100" --jq ".workflow_runs[] | select(.run_number > $CURRENT_RUN_NUMBER and .conclusion == \"success\") | .id")
+          test -z "$newer"
+      - name: Deploy successfully validated artifact
+        id: deployment
+        uses: actions/deploy-pages@v4

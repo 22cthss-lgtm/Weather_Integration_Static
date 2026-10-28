@@ -4,6 +4,8 @@ import re
 
 import requests
 
+from ..http_client import http_get
+
 from .base import BaseImageService
 
 
@@ -60,7 +62,7 @@ class CIMSSService(BaseImageService):
 
     def fetch_page_html(self) -> str | None:
         try:
-            response = requests.get(
+            response = http_get(
                 self.source_page_url,
                 timeout=20,
                 headers=self.no_cache_headers(),
@@ -73,7 +75,7 @@ class CIMSSService(BaseImageService):
 
     def fetch_specific_page_html(self, page_url: str) -> str | None:
         try:
-            response = requests.get(
+            response = http_get(
                 page_url,
                 timeout=20,
                 headers=self.no_cache_headers(),
@@ -87,7 +89,7 @@ class CIMSSService(BaseImageService):
     def fetch_image_response(self, image_url: str) -> requests.Response | None:
         response = None
         try:
-            response = requests.get(
+            response = http_get(
                 image_url,
                 timeout=20,
                 headers=self.no_cache_headers(),

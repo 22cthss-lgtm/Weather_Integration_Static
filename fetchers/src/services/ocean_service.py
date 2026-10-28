@@ -3,6 +3,8 @@ import re
 
 import requests
 
+from ..http_client import http_get
+
 from .base import BaseImageService
 
 
@@ -26,7 +28,7 @@ class OceanService(BaseImageService):
 
         try:
             try:
-                date_script = session.get(self.sst_date_script_url, timeout=15)
+                date_script = http_get(self.sst_date_script_url, session=session, timeout=15)
                 date_script.raise_for_status()
             except requests.RequestException as exc:
                 raise RuntimeError(f"JMA SST date request failed: {exc}") from exc
@@ -44,7 +46,7 @@ class OceanService(BaseImageService):
             image_url = f"{self.sst_image_base_url}/{match.group('year')}/him_sst_pac_D{date_string}.gif"
 
             try:
-                with session.get(image_url, timeout=15, stream=True) as response:
+                with http_get(image_url, session=session, timeout=15, stream=True) as response:
                     response.raise_for_status()
                     if not response.headers.get("Content-Type", "").lower().startswith("image/"):
                         raise RuntimeError("JMA SST image URL did not return an image")

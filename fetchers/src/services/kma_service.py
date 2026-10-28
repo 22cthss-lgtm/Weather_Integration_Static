@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+from ..http_client import http_get
+
 from .base import BaseImageService
 
 
@@ -22,7 +24,7 @@ class KMAService(BaseImageService):
 
     def image_exists(self, image_url: str) -> bool:
         try:
-            response = requests.get(
+            response = http_get(
                 image_url,
                 timeout=10,
                 stream=True,
@@ -52,7 +54,7 @@ class KMAService(BaseImageService):
 
     def resolve_850hpa_image_url(self) -> tuple[str, str] | None:
         try:
-            response = requests.get(
+            response = http_get(
                 self.analysis_image_api_url,
                 timeout=10,
                 headers=self.no_cache_headers(),

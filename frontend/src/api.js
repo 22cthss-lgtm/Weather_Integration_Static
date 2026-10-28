@@ -1,9 +1,7 @@
+import { imageTypes } from "./image-types";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5174";
-const STATIC_IMAGE_TYPES = new Set([
-  "sst", "temperature", "weather_chart", "850hpa", "tchp",
-  "cimss_wind_analysis", "cimss_steering_flow", "seaice_arctic", "seaice_antarctic",
-  "radar", "satellite", "rainfall",
-]);
+const STATIC_IMAGE_TYPES = new Set(imageTypes);
 const CURRENT_IMAGE_TYPES = new Set(["radar", "satellite", "rainfall"]);
 
 async function readStatic(path) {
@@ -23,10 +21,11 @@ export async function fetchCurrentImageHistory(type, date) {
   return data;
 }
 
-export async function fetchLatestImage(type) {
+export async function fetchLatestImage(type, { signal } = {}) {
   if (STATIC_IMAGE_TYPES.has(type)) {
     const response = await fetch(`${import.meta.env.BASE_URL}data/images/${type}/latest.json`, {
       cache: "no-cache",
+      ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch latest image for ${type} (static JSON)`);

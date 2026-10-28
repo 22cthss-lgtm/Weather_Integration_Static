@@ -4,6 +4,8 @@ from typing import Iterable
 
 import requests
 
+from ..http_client import http_get
+
 
 @dataclass
 class ImagePayload:
@@ -42,7 +44,7 @@ class BaseImageService:
 
     def request_placeholder(self, url: str) -> None:
         try:
-            requests.get(url, timeout=5)
+            http_get(url, timeout=5)
         except requests.RequestException:
             # Placeholder fetch failures should not stop the pipeline.
             return
