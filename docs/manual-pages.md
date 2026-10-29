@@ -1,5 +1,8 @@
 # 第一版：手動發布指定快照到 GitHub Pages
 
+> 本文保留第一次部署的背景與打包方式。現行 workflow 已加入可選的手動抓取模式、
+> 前次 Actions artifact 恢復與必填保存天數；目前操作請見 [手動更新與發布](manual-refresh-pages.md)。
+
 ## 本版界線
 
 只有 `workflow_dispatch` 手動觸發，不含 schedule、push、自動抓取、自動 commit、

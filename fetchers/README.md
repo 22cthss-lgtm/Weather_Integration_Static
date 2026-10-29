@@ -373,3 +373,10 @@ OS 在程序退出或崩潰時自動釋放鎖；檔案保留存在是正常的�
 不執行 Fetcher、不需要 CWA Key、不自動 commit，尚未操作任何線上設定／部署。
 首次傳輸、期限、GitHub 設定與提交清單請見 [手動 Pages 說明](../docs/manual-pages.md)。
 測試用相依套件請安裝 `fetchers/requirements-dev.txt`（沿用 unittest，新增 YAML 驗證）。
+
+## 手動更新並發布
+
+沿用現有 Pages workflow，以 `refresh` 模式恢復指定有效快照、抓取資料並驗證發布；
+`publish` 模式仍可只發布指定資料。跨次使用明確 run ID 的 Actions artifact，保存天數
+由操作者必填，不自動 commit、不建立資料分支、不啟用排程。
+完整輸入、Secrets、失敗復原與尚待確認政策見 [manual-refresh-pages.md](../docs/manual-refresh-pages.md)。
