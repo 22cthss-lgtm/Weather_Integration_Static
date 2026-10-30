@@ -12,9 +12,9 @@ const products = Object.fromEntries(types.map(type => [type,
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-function serveRealOutputs() {
+function serveRealOutputs(clock = products.radar.fetched_at) {
   vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date(products.radar.fetched_at));
+  vi.setSystemTime(new Date(clock));
   const request = vi.fn(async url => {
     if (!url.startsWith("/data/") || url.includes("..")) throw new Error("Only published JSON is supported");
     const data = JSON.parse(readFileSync(resolve(`public${url}`), "utf8"));
@@ -36,8 +36,10 @@ test("Dashboard renders all three actual CWA latest outputs", async () => {
 });
 
 test.each(types)("%s detail reads actual current-day Fetcher output", async type => {
-  serveRealOutputs();
   const product = products[type];
+  // Resources can legitimately retain data from different days after partial
+  // source failures. Test this product's same-day inventory independently.
+  serveRealOutputs(product.image_time);
   const date = product.image_time.slice(0, 10);
   const history = JSON.parse(readFileSync(resolve(`public/data/images/${type}/history/${date}.json`), "utf8"));
   render(<MemoryRouter initialEntries={[`/images/${type}`]}><App /></MemoryRouter>);
@@ -45,4 +47,17 @@ test.each(types)("%s detail reads actual current-day Fetcher output", async type
   const options = await screen.findAllByRole("option");
   expect(options.map(option => option.value)).toEqual(history.items.map(item => item.image_time));
   expect(screen.getByRole("combobox").value).toBe(product.image_time);
+});
+
+test.each(types)("%s retained output stays visible without yesterday's time options", async type => {
+  const product = products[type];
+  const nextDay = new Date(new Date(product.image_time).getTime() + 24 * 60 * 60 * 1000);
+  const request = serveRealOutputs(nextDay);
+  render(<MemoryRouter initialEntries={[`/images/${type}`]}><App /></MemoryRouter>);
+  const image = await screen.findByAltText(product.title);
+  expect(image.getAttribute("src")).toBe(product.image_url);
+  await screen.findByText(/當日資料尚未取得/);
+  expect(screen.getByRole("combobox").disabled).toBe(true);
+  expect(screen.queryAllByRole("option")).toHaveLength(0);
+  expect(request.mock.calls.some(([url]) => url.startsWith(`/data/images/${type}/history/`))).toBe(false);
 });
