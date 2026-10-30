@@ -91,20 +91,43 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(entry['error_code'], 'invalid_output')
 
     def test_history_partial_failure_remains_visible_and_preserves_old_items(self):
+        from datetime import datetime, timedelta
         from src.snapshot_runner import run_candidate
-        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as d:
-            base = Path(d)
-            self.seed(base / 'old')
-            def partial(kind, output):
-                p = next((output / kind / 'history').glob('*.json'))
-                data = json.loads(p.read_text(encoding='utf-8'))
-                data.update(complete=False, failed=[data['items'][0]['image_time']])
-                p.write_text(json.dumps(data), encoding='utf-8')
-                raise RuntimeError('source')
-            report = run_candidate(['radar'], base / 'old', base / 'store', partial)
-            entries = [r for n, r in report['resources'].items() if r['state'] == 'incomplete_history']
-            self.assertTrue(any(r['updated'] for r in entries))
-            self.assertTrue(report['publishable'])
+        from src.snapshots import validate_resource
+        for existing_gap in ('missing', 'failed'):
+            with self.subTest(existing_gap=existing_gap), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as d:
+                base = Path(d)
+                self.seed(base / 'old')
+                history = next((base / 'old/images/radar/history').glob('*.json'))
+                relative = history.relative_to(base / 'old')
+                previous = json.loads(history.read_text(encoding='utf-8'))
+                slot = previous['items'][0]['image_time']
+                previous.update(complete=False,
+                                missing=[t for t in previous['missing'] if t != slot],
+                                failed=[t for t in previous['failed'] if t != slot])
+                previous[existing_gap].append(slot)
+                validate_resource(relative.as_posix(), previous)
+                history.write_text(json.dumps(previous), encoding='utf-8')
+                def partial(kind, output):
+                    p = output / kind / 'history' / history.name
+                    data = json.loads(p.read_text(encoding='utf-8'))
+                    # A valid partial write must be both different and valid
+                    # regardless of the selected snapshot's existing gaps.
+                    data.update(complete=False,
+                                missing=[t for t in data['missing'] if t != slot],
+                                failed=sorted(set(data['failed']) | {slot}),
+                                updated_at=(datetime.fromisoformat(data['updated_at']) + timedelta(seconds=1)).isoformat())
+                    validate_resource(relative.as_posix(), data)
+                    p.write_text(json.dumps(data), encoding='utf-8')
+                    raise RuntimeError('source')
+                report = run_candidate(['radar'], base / 'old', base / 'store', partial)
+                entry = report['resources'][relative.as_posix()]
+                self.assertEqual(entry['state'], 'incomplete_history')
+                self.assertTrue(entry['updated'])
+                self.assertEqual(entry['error_code'], 'product_incomplete')
+                self.assertTrue(report['publishable'])
+                published = base / 'store/snapshots' / report['snapshot_id'] / 'data' / relative
+                self.assertEqual(json.loads(published.read_text(encoding='utf-8'))['items'], previous['items'])
 
     def test_snapshot_save_failure_leaves_previous_pointer(self):
         from unittest.mock import patch
