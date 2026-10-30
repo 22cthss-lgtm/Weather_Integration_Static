@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "tasks": {
+    "radar": {
+      "mode": "interval",
+      "interval_seconds": 600,
+      "retry_delays_seconds": [
+        600,
+        1200,
+        2400,
+        3600
+      ]
+    },
+    "satellite": {
+      "mode": "interval",
+      "interval_seconds": 600,
+      "retry_delays_seconds": [
+        600,
+        1200,
+        2400,
+        3600
+      ]
+    },
+    "rainfall": {
+      "mode": "interval",
+      "interval_seconds": 1800,
+      "retry_delays_seconds": [
+        600,
+        1200,
+        2400,
+        3600
+      ]
+    },
+    "rainfall_rankings": {
+      "mode": "interval",
+      "interval_seconds": 600,
+      "retry_delays_seconds": [
+        600,
+        1200,
+        2400,
+        3600
+      ]
+    },
+    "temperature": {
+      "mode": "interval",
+      "interval_seconds": 3600,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    },
+    "sst": {
+      "mode": "interval",
+      "interval_seconds": 86400,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    },
+    "weather_chart": {
+      "mode": "interval",
+      "interval_seconds": 21600,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    },
+    "850hpa": {
+      "mode": "interval",
+      "interval_seconds": 21600,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    },
+    "tchp": {
+      "mode": "interval",
+      "interval_seconds": 86400,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    },
+    "cimss_wind_analysis": {
+      "mode": "interval",
+      "interval_seconds": 10800,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    },
+    "cimss_steering_flow": {
+      "mode": "interval",
+      "interval_seconds": 10800,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    },
+    "seaice_arctic": {
+      "mode": "interval",
+      "interval_seconds": 86400,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    },
+    "seaice_antarctic": {
+      "mode": "interval",
+      "interval_seconds": 86400,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400,
+        21600
+      ]
+    }
+  }
+}

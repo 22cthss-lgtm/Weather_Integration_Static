@@ -3,6 +3,12 @@ name: Publish validated snapshot to Pages (manual)
 on:
   workflow_dispatch:
     inputs:
+      snapshot_source:
+        description: 'Automatically recover the newest verified data, or select an explicit source'
+        required: true
+        default: auto
+        type: choice
+        options: [auto, explicit]
       mode:
         description: 'Publish selected data only, or refresh sources before publishing'
         required: true
@@ -14,8 +20,9 @@ on:
         required: false
         type: string
       snapshot_retention_days:
-        description: 'Explicit snapshot artifact retention (1..30 days); no permanent policy is assumed'
+        description: 'Online test setting only: artifact and ZIP validity 7 days'
         required: true
+        default: 7
         type: number
       snapshot_release:
         description: 'Exact Release tag containing the uploaded snapshot ZIP'
@@ -27,7 +34,7 @@ on:
         type: string
       snapshot_sha256:
         description: 'Exact snapshot ZIP SHA-256 from pack output or earlier run summary'
-        required: true
+        required: false
         type: string
 
 permissions:
@@ -48,6 +55,10 @@ jobs:
     outputs:
       snapshot_id: ${{ steps.snapshot.outputs.snapshot_id }}
       deploy: ${{ steps.snapshot.outputs.deploy }}
+      new_snapshot: ${{ steps.snapshot.outputs.save_snapshot }}
+      content_id: ${{ steps.snapshot.outputs.content_id }}
+      data_artifact_id: ${{ steps.save_data.outputs.artifact-id || steps.resolve.outputs.snapshot_artifact_id }}
+      state_artifact_id: ${{ steps.save_state.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -63,6 +74,7 @@ jobs:
       - name: Require default branch and validate exact input
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_MODE: ${{ inputs.snapshot_source }}
           MODE: ${{ inputs.mode }}
           SOURCE_RUN: ${{ inputs.snapshot_run_id }}
           RETENTION_DAYS: ${{ inputs.snapshot_retention_days }}
@@ -72,8 +84,20 @@ jobs:
         run: |
           test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
           python -B fetchers/refresh_pages.py inputs
+      - name: Refuse obsolete batch before restoring or fetching
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python -B fetchers/manage_snapshots.py guard
+      - name: Automatically recover trusted data and scheduler state
+        id: resolve
+        if: inputs.snapshot_source == 'auto'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python -B fetchers/manage_snapshots.py resolve
       - name: Validate origin of explicitly selected prior run
-        if: inputs.snapshot_run_id != ''
+        if: inputs.snapshot_source == 'explicit' && inputs.snapshot_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -84,7 +108,7 @@ jobs:
           gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > "$RUN_METADATA"
           python -B fetchers/refresh_pages.py source-run
       - name: Download snapshot from exact prior run
-        if: inputs.snapshot_run_id != ''
+        if: inputs.snapshot_source == 'explicit' && inputs.snapshot_run_id != ''
         uses: actions/download-artifact@v5
         with:
           name: weather-snapshot
@@ -92,7 +116,7 @@ jobs:
           run-id: ${{ inputs.snapshot_run_id }}
           github-token: ${{ github.token }}
       - name: Download explicitly selected Release asset
-        if: inputs.snapshot_run_id == ''
+        if: inputs.snapshot_source == 'explicit' && inputs.snapshot_run_id == ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -106,7 +130,7 @@ jobs:
       - name: Validate selected snapshot and optionally refresh sources
         id: snapshot
         env:
-          ASSET_SHA: ${{ inputs.snapshot_sha256 }}
+          ASSET_SHA: ${{ steps.resolve.outputs.sha256 || inputs.snapshot_sha256 }}
           MODE: ${{ inputs.mode }}
           RETENTION_DAYS: ${{ inputs.snapshot_retention_days }}
           CWA_API_KEY: ${{ inputs.mode == 'refresh' && secrets.CWA_API_KEY || '' }}
@@ -118,6 +142,7 @@ jobs:
           if [ -d "$WORK/site-data" ]; then
             rm -rf frontend/public/data
             mv "$WORK/site-data" frontend/public/data
+            cp "$WORK/deployment.json" frontend/public/deployment.json
           fi
       - name: Python tests
         if: steps.snapshot.outputs.deploy == 'true'
@@ -143,18 +168,46 @@ jobs:
         if: steps.snapshot.outputs.deploy == 'true'
         env:
           SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot_id }}
-          ASSET_SHA: ${{ inputs.snapshot_sha256 }}
+          ASSET_SHA: ${{ steps.resolve.outputs.sha256 || inputs.snapshot_sha256 }}
         run: |
           printf '\nCode: `%s`\n\nInput SHA-256: `%s`\n\nSnapshot recovery run: `%s` (artifact `weather-snapshot`)\n\n' "$GITHUB_SHA" "$ASSET_SHA" "$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
           python -c 'import json,os; r=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"pages-input-result.json"))); open(os.environ["GITHUB_STEP_SUMMARY"],"a").write("Known incomplete histories: "+str(len(r["incomplete_history"]))+"\n")'
+      - name: Refuse obsolete batch before saving
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python -B fetchers/manage_snapshots.py guard
       - name: Preserve validated public snapshot before deployment
-        if: steps.snapshot.outputs.deploy == 'true'
+        id: save_data
+        if: steps.snapshot.outputs.save_snapshot == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: weather-snapshot
           path: ${{ runner.temp }}/pages-work/output/weather-snapshot.zip
           retention-days: ${{ inputs.snapshot_retention_days }}
           if-no-files-found: error
+      - name: Download and verify newly saved data before deployment
+        if: steps.snapshot.outputs.save_snapshot == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DATA_ARTIFACT_ID: ${{ steps.save_data.outputs.artifact-id }}
+        run: python -B fetchers/manage_snapshots.py verify-data
+      - name: Preserve safe scheduler state even when data is unchanged
+        id: save_state
+        uses: actions/upload-artifact@v4
+        with:
+          name: weather-scheduler-state
+          path: ${{ runner.temp }}/pages-work/state/scheduler-state.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Download and verify saved scheduler state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          STATE_ARTIFACT_ID: ${{ steps.save_state.outputs.artifact-id }}
+          CONTENT_ID: ${{ steps.snapshot.outputs.content_id }}
+        run: python -B fetchers/manage_snapshots.py verify-state
       - name: Upload validated website only
         if: steps.snapshot.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@v4
@@ -167,6 +220,8 @@ jobs:
     if: needs.build.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     permissions:
       contents: read
       actions: read
@@ -176,14 +231,42 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r fetchers/requirements.txt
       - name: Refuse an older queued run after a newer successful run
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          CURRENT_RUN_NUMBER: ${{ github.run_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          newer=$(gh api --method GET --paginate "repos/$GH_REPO/actions/workflows/pages-manual.yml/runs?event=workflow_dispatch&per_page=100" --jq ".workflow_runs[] | select(.run_number > $CURRENT_RUN_NUMBER and .conclusion == \"success\") | .id")
-          test -z "$newer"
+          python -B fetchers/manage_snapshots.py guard
       - name: Deploy successfully validated artifact
         id: deployment
         uses: actions/deploy-pages@v4
+
+  cleanup:
+    needs: [build, deploy]
+    if: always() && needs.build.result == 'success' && needs.build.outputs.state_artifact_id != '' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r fetchers/requirements.txt
+      - name: Reverify saved artifacts and deployed protection before bounded cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          NEW_SNAPSHOT: ${{ needs.build.outputs.new_snapshot }}
+          CONTENT_ID: ${{ needs.build.outputs.content_id }}
+          DATA_ARTIFACT_ID: ${{ needs.build.outputs.data_artifact_id }}
+          STATE_ARTIFACT_ID: ${{ needs.build.outputs.state_artifact_id }}
+          SITE_URL: ${{ needs.deploy.outputs.page_url }}
+        run: python -B fetchers/manage_snapshots.py cleanup

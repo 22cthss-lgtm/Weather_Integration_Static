@@ -17,10 +17,10 @@ def belongs(name, product):
     return name.startswith(prefix)
 
 
-def run_candidate(products, seed_data, store, update):
+def run_candidate(products, seed_data, store, update, *, allow_empty=False):
     """Never edit the seed/public directory; all mutations happen in a temp tree."""
     products = list(dict.fromkeys(products))
-    if not products:
+    if not products and not allow_empty:
         raise ValueError('At least one product is required')
     store = Path(store)
     seed_data = Path(seed_data)

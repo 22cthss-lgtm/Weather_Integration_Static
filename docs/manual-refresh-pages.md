@@ -1,5 +1,8 @@
 # 手動抓取最新資料，再發布 GitHub Pages
 
+> 本文記錄前版明確指定快照的流程。新版另加入 auto 選取與到期更新；
+> 現行政策與手動驗證方式請見 [按到期項目更新](due-refresh.md)。
+
 本功能延用 `.github/workflows/pages-manual.yml`。只有 Run workflow，沒有排程、push
 觸發、自動 commit JSON 或資料分支。本次只完成本機實作；尚未執行新版線上流程。
 

@@ -28,7 +28,7 @@ def site_summary(data_root):
     return {'json_files': len(resources), 'incomplete_history': sorted(incomplete)}
 
 
-def pack_snapshot(snapshot, archive, *, valid_days=7, now=None):
+def pack_snapshot(snapshot, archive, *, valid_days=7, now=None, content=None):
     now = now or datetime.now(timezone.utc)
     if now.utcoffset() != timedelta(0) or type(valid_days) is not int or not 1 <= valid_days <= 30:
         raise ValueError('Package validity must be 1..30 days in UTC')
@@ -40,12 +40,17 @@ def pack_snapshot(snapshot, archive, *, valid_days=7, now=None):
         data = Path(temporary) / 'data'
         manifest = restore_snapshot(snapshot, data)
         summary = site_summary(data)
-        transport = {'schema_version': 1, 'snapshot_id': manifest['snapshot_id'],
+        if content is not None:
+            from .content_versions import verify_content
+            verify_content(data, content)
+        transport = {'schema_version': 2 if content is not None else 1, 'snapshot_id': manifest['snapshot_id'],
                      'created_at': now.isoformat(), 'expires_at': (now + timedelta(days=valid_days)).isoformat()}
         staged = Path(temporary) / 'input.zip'
         with ZipFile(staged, 'w', ZIP_DEFLATED) as output:
             output.writestr('manifest.json', json.dumps(manifest))
             output.writestr('transport.json', json.dumps(transport))
+            if content is not None:
+                output.writestr('content.json', json.dumps(content))
             for name in sorted(manifest['files']):
                 output.write(data / name, 'data/' + name)
         # Exercise exactly the reader used by Actions before issuing a package.
@@ -53,6 +58,7 @@ def pack_snapshot(snapshot, archive, *, valid_days=7, now=None):
         unpack_snapshot(staged, sha, Path(temporary) / 'check', now=now)
         staged.replace(archive)
     return dict(summary, snapshot_id=manifest['snapshot_id'], sha256=sha,
+                **({'content_id': content['content_id'], 'content_created_at': content['content_created_at']} if content else {}),
                 expires_at=transport['expires_at'], archive=str(archive.resolve()))
 
 
@@ -81,7 +87,7 @@ def unpack_snapshot(archive, expected_sha256, destination, *, now=None):
                     name = entry.filename
                     if ('\\' in name or stat.S_ISLNK(entry.external_attr >> 16)
                             or entry.file_size > 8 * 1024 * 1024 or entry.flag_bits & 1
-                            or not (name in ('manifest.json', 'transport.json')
+                            or not (name in ('manifest.json', 'transport.json', 'content.json')
                                     or name.startswith('data/') and allowed_path(name[5:]))):
                         raise ValueError('Unapproved package entry')
                     output = root / name
@@ -90,7 +96,7 @@ def unpack_snapshot(archive, expected_sha256, destination, *, now=None):
             transport = json.loads((root / 'transport.json').read_text(encoding='utf-8'))
             exact(transport, {'schema_version', 'snapshot_id', 'created_at', 'expires_at'})
             created, expires = instant(transport['created_at'], utc=True), instant(transport['expires_at'], utc=True)
-            if (type(transport['schema_version']) is not int or transport['schema_version'] != 1
+            if (type(transport['schema_version']) is not int or transport['schema_version'] not in (1, 2)
                     or not created <= now < expires or not timedelta(0) < expires - created <= timedelta(days=30)):
                 raise ValueError('Input package expired or has invalid validity dates')
             manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
@@ -98,8 +104,18 @@ def unpack_snapshot(archive, expected_sha256, destination, *, now=None):
                 raise ValueError('Transport snapshot ID mismatch')
             # Validate cross-file website needs before installing any destination.
             summary = site_summary(root / 'data')
+            from .content_versions import content_metadata, verify_content
+            if transport['schema_version'] == 2:
+                content = verify_content(root / 'data', json.loads((root / 'content.json').read_text(encoding='utf-8')))
+                if instant(content['content_created_at'], utc=True) > created:
+                    raise ValueError('Content generation is newer than its package')
+            else:
+                if (root / 'content.json').exists():
+                    raise ValueError('Legacy transport cannot carry version metadata')
+                content = content_metadata(root / 'data', {}, transport['created_at'])
             restore_snapshot(root, destination)
             return dict(summary, snapshot_id=manifest['snapshot_id'], expires_at=transport['expires_at'],
-                        files=manifest['files'])
+                        files=manifest['files'], content=content, content_id=content['content_id'],
+                        content_created_at=content['content_created_at'])
     except (OSError, BadZipFile, KeyError, TypeError, RuntimeError):
         raise ValueError('Snapshot package could not be validated/restored') from None

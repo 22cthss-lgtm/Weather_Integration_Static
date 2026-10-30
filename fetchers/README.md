@@ -376,6 +376,10 @@ OS 在程序退出或崩潰時自動釋放鎖；檔案保留存在是正常的�
 
 ## 手動更新並發布
 
+新版支援 auto 選取快照與按圖資到期檢查，使用者確認的配置集中於 policies/。
+資料與狀態分開保存、版本去重與七天期限說明見 [按到期項目更新](../docs/due-refresh.md)。
+workflow 目前仍只有手動觸發，沒有啟用 schedule。
+
 沿用現有 Pages workflow，以 `refresh` 模式恢復指定有效快照、抓取資料並驗證發布；
 `publish` 模式仍可只發布指定資料。跨次使用明確 run ID 的 Actions artifact，保存天數
 由操作者必填，不自動 commit、不建立資料分支、不啟用排程。

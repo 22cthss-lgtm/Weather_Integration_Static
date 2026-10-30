@@ -39,7 +39,7 @@ class PagesWorkflowTests(unittest.TestCase):
         workflow = yaml.load(path.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         inputs = workflow['on']['workflow_dispatch']['inputs']
         self.assertEqual(inputs['mode']['options'], ['publish', 'refresh'])
-        self.assertNotIn('default', inputs['snapshot_retention_days'])
+        self.assertEqual(inputs['snapshot_retention_days']['default'], '7')
         self.assertEqual(inputs['snapshot_retention_days']['required'], 'true')
         build = workflow['jobs']['build']
         self.assertEqual(build['permissions']['actions'], 'read')
@@ -55,3 +55,24 @@ class PagesWorkflowTests(unittest.TestCase):
         download = next(step for step in steps if step.get('uses', '').startswith('actions/download-artifact@'))
         self.assertEqual(download['with']['run-id'], '${{ inputs.snapshot_run_id }}')
         self.assertEqual(download['with']['name'], 'weather-snapshot')
+
+    def test_auto_due_recovery_readback_and_separate_cleanup_permissions(self):
+        path = Path(__file__).resolve().parents[2] / '.github/workflows/pages-manual.yml'
+        workflow = yaml.load(path.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
+        inputs = workflow['on']['workflow_dispatch']['inputs']
+        self.assertEqual(inputs['snapshot_source']['default'], 'auto')
+        self.assertEqual(inputs['snapshot_sha256']['required'], 'false')
+        steps = workflow['jobs']['build']['steps']
+        recorded = next(step for step in steps if step.get('name') == 'Record selected code and data')
+        self.assertEqual(recorded['env']['ASSET_SHA'], '${{ steps.resolve.outputs.sha256 || inputs.snapshot_sha256 }}')
+        scripts = '\n'.join(step.get('run', '') for step in steps)
+        for command in ('manage_snapshots.py resolve', 'manage_snapshots.py verify-data',
+                        'manage_snapshots.py verify-state', 'manage_snapshots.py guard'):
+            self.assertIn(command, scripts)
+        saved = next(step for step in steps if step.get('id') == 'save_data')
+        self.assertIn("save_snapshot == 'true'", saved['if'])
+        cleanup = workflow['jobs']['cleanup']
+        self.assertEqual(cleanup['permissions']['actions'], 'write')
+        self.assertNotIn('contents: write', path.read_text())
+        self.assertIn('deploy', cleanup['needs'])
+        self.assertIn('manage_snapshots.py cleanup', '\n'.join(step.get('run', '') for step in cleanup['steps']))

@@ -10,14 +10,17 @@ import re
 
 from .publication import atomic_write_json, validate_image
 from .services.cwa_service import CWAService
+from .history_reconciliation import current_history_context
 
 CURRENT_PRODUCTS = ('radar', 'satellite', 'rainfall')
 
 
 def publish_current_history(service, latest, output_root, now=None):
-    now = (now or datetime.now(service.satellite_timezone)).astimezone(service.satellite_timezone)
+    context = current_history_context()
+    now = (now or (context.now if context else datetime.now(service.satellite_timezone))).astimezone(service.satellite_timezone)
     end = datetime.fromisoformat(latest.image_time).astimezone(service.satellite_timezone)
     if end.date() != now.date():
+        if context: context.outcome(latest.image_type,history_state='unavailable')
         return None  # Keep previous latest for the UI, never scan yesterday as today.
     if end > now:
         raise RuntimeError('CWA product time is in the future')
@@ -42,13 +45,14 @@ def publish_current_history(service, latest, output_root, now=None):
         except Exception:
             return slot, None, 'failed'
 
-    # Independent URL checks only; merge and write once on the calling thread.
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        contexts = [(copy_context(), slot) for slot in slots]
-        results = list(pool.map(lambda pair: pair[0].run(probe, pair[1]), contexts))
-    successes = [item for _, item, status in results if status is None]
-    if not successes:
-        raise RuntimeError(f'{kind}: no verified slots; previous history preserved')
+    results = []
+    if context is None:
+        # Preserve the existing unbounded explicit CLI behavior.
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            contexts = [(copy_context(), slot) for slot in slots]
+            results = list(pool.map(lambda pair: pair[0].run(probe, pair[1]), contexts))
+        if not any(status is None for _, _, status in results):
+            raise RuntimeError(f'{kind}: no verified slots; previous history preserved')
     output = Path(output_root) / kind / 'history' / f'{end.date()}.json'
     existing = []
     if output.exists():
@@ -60,25 +64,30 @@ def publish_current_history(service, latest, output_root, now=None):
             validate_image(kind, item)
             if datetime.fromisoformat(item['image_time']).astimezone(service.satellite_timezone).date() != end.date():
                 raise RuntimeError('Existing history has a wrong-day item')
-    merged = {item['image_time']: item for item in existing}
-    # Preserve the original successful metadata for already-known slots.
-    for item in successes:
-        merged.setdefault(item['image_time'], item)
-    missing = [slot.isoformat() for slot, _, status in results if status == 'missing']
-    failed = [slot.isoformat() for slot, _, status in results if status == 'failed']
+    if context:
+        validate_image(kind,asdict(latest))
+        items, missing, failed = context.reconcile(kind,slots,existing,asdict(latest),probe)
+    else:
+        merged = {item['image_time']: item for item in existing}
+        for _, item, status in results:
+            if status is None: merged.setdefault(item['image_time'], item)
+        items = list(merged.values())
+        missing = [slot.isoformat() for slot, _, status in results if status == 'missing']
+        failed = [slot.isoformat() for slot, _, status in results if status == 'failed']
     data = {
         'image_type': kind, 'date': end.date().isoformat(), 'timezone': 'Asia/Taipei',
         'updated_at': datetime.now(timezone.utc).isoformat(),
         'range_start': slots[0].isoformat(), 'range_end': end.isoformat(),
         'expected_count': len(slots), 'complete': not missing and not failed,
         'missing': missing, 'failed': failed,
-        'items': sorted(merged.values(), key=lambda item: item['image_time']),
+        'items': sorted(items, key=lambda item: item['image_time']),
     }
     return atomic_write_json(data, output)
 
 
 def update_daily_rainfall(service, output_root, now=None):
-    now = (now or datetime.now(service.satellite_timezone)).astimezone(service.satellite_timezone)
+    context = current_history_context()
+    now = (now or (context.now if context else datetime.now(service.satellite_timezone))).astimezone(service.satellite_timezone)
     script = service.fetch_rainfall_day_script()
     # Only the original normal-colour tab, using the official first entry in
     # each Day group. Do not evaluate upstream JavaScript or guess a filename.
@@ -115,13 +124,14 @@ def update_daily_rainfall(service, output_root, now=None):
 def _update_latest_and_history(kind, output_root):
     from .publication import publish_image
     service = CWAService()
+    context = current_history_context()
     items = list(getattr(service, f'fetch_{kind}')())
     if len(items) != 1:
         raise RuntimeError(f'{kind}: latest source unavailable; previous JSON preserved')
     latest = items[0]
     validate_image(kind, asdict(latest))
     time = datetime.fromisoformat(latest.image_time).astimezone(service.satellite_timezone)
-    if time > datetime.now(service.satellite_timezone):
+    if time > (context.now if context else datetime.now(service.satellite_timezone)):
         raise RuntimeError('CWA latest image time is in the future')
     if time.minute % (30 if kind == 'rainfall' else 10) or time.second:
         raise RuntimeError('CWA latest image is not on the expected time grid')
@@ -138,31 +148,32 @@ def _update_latest_and_history(kind, output_root):
             from .services.base import ImagePayload
             latest = ImagePayload(**previous)
     publish_image(kind, [latest], output)
-    errors = []
+    if context: context.outcome(kind,latest_ok=True)
     try:
         history = publish_current_history(service, latest, output_root)
-        if history and history['failed']:
-            errors.append('some current-day source requests failed')
-    except Exception as exc:
-        errors.append(str(exc))
-    if errors:
-        raise RuntimeError('; '.join(errors))
+        if context:
+            context.outcome(kind,history_state=('complete' if history and history['complete'] else 'incomplete'))
+    except Exception:
+        if context: context.outcome(kind,history_state='unavailable',safe_code='history_error')
     return asdict(latest)
 
 
 def update_current_product(kind, output_root):
+    context = current_history_context()
     errors = []
     data = None
     try:
         data = _update_latest_and_history(kind, output_root)
     except Exception as exc:
         errors.append(str(exc))
+        if context: context.outcome(kind,latest_ok=False,history_state='unavailable',safe_code='latest_error')
     # Daily rain is a separate successful resource, even if latest/history fails.
     if kind == 'rainfall':
         try:
             update_daily_rainfall(CWAService(), output_root)
-        except Exception as exc:
-            errors.append(str(exc))
+            if context: context.outcome(kind,daily_ok=True)
+        except Exception:
+            if context: context.outcome(kind,daily_ok=False,safe_code='daily_error')
     if errors:
         raise RuntimeError('; '.join(errors))
     return data

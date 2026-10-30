@@ -27,7 +27,7 @@ def validate_run(run, run_id, default_branch):
     path = '.github/workflows/pages-manual.yml'
     allowed = (path, path + '@' + default_branch, path + '@refs/heads/' + default_branch)
     if (str(run.get('id')) != run_id or run.get('path') not in allowed
-            or run.get('event') != 'workflow_dispatch' or run.get('status') != 'completed'
+            or run.get('event') not in ('workflow_dispatch', 'schedule') or run.get('status') != 'completed'
             or run.get('head_branch') != default_branch):
         raise ValueError('Source must be a completed manual run on the default branch')
 
@@ -74,6 +74,15 @@ def summary_markdown(result):
     if result.get('snapshot_id'):
         lines += [f"Snapshot: `{result['snapshot_id']}`", f"SHA-256: `{result.get('sha256', '')}`",
                   f"Package expires: `{result.get('expires_at', '')}`", '']
+    if 'checks' in result:
+        lines += [f"Content version: `{result['content_id']}`", f"State recovery: `{result.get('state_warning') or 'restored'}`", '',
+                  '| Check | State | Reason | Retry count | Next due / retry (UTC) | Details |',
+                  '| --- | --- | --- | --- | --- | --- |']
+        for kind, check in sorted(result['checks'].items()):
+            task = result['scheduler_state']['scheduler']['tasks'][kind]
+            lines.append(f"| {kind} | {check['state']} | {check['reason']} | {task['consecutive_failures']} | "
+                         f"{task['next_retry_at'] or task['next_due_at'] or ''} | {json.dumps(check.get('outcome', {}), sort_keys=True)} |")
+        lines.append('')
     lines += ['### Product fetch results', '']
     lines += [f'- {name}: {state}' for name, state in sorted(result['products'].items())]
     lines += ['', '### Resource results', '', '| Resource | State | Changed | Failure/warning |',

@@ -5,11 +5,35 @@ from zoneinfo import ZoneInfo
 import requests
 
 from ..http_client import http_get
+from ..history_reconciliation import current_history_context
 import urllib3
 
 from .base import BaseImageService
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+def _candidate_event(category, *, fatal=False):
+    """Record safe counters only; no URL, raw response or exception text."""
+    context = current_history_context()
+    if context is None:
+        return
+    kind = getattr(context, 'active_kind', None)
+    if isinstance(kind, str) and kind:
+        field = f'candidate_{category}_count'
+        count = context.outcomes.get(kind, {}).get(field, 0)
+        context.outcome(kind, **{field: count + 1})
+    if fatal:
+        code = 'candidate_validation_error' if category == 'invalid' else 'candidate_source_error'
+        raise RuntimeError(code) from None
+
+
+def _index_fault(error):
+    response = getattr(error, 'response', None)
+    if response is not None and response.status_code in (404, 410):
+        _candidate_event('missing')
+    else:
+        _candidate_event('fault', fatal=True)
 
 
 class CWAService(BaseImageService):
@@ -62,6 +86,7 @@ class CWAService(BaseImageService):
         }
 
     def image_exists(self, image_url: str) -> bool:
+        response = None
         try:
             response = http_get(
                 image_url,
@@ -71,11 +96,24 @@ class CWAService(BaseImageService):
                 params={"_": datetime.now(self.satellite_timezone).timestamp()},
                 verify=False,
             )
-            exists = response.ok and (response.headers.get("content-type") or "").lower().startswith("image/")
-            response.close()
+            if response.status_code in (404, 410):
+                _candidate_event('missing')
+                return False
+            if not response.ok:
+                _candidate_event('fault', fatal=True)
+                return False
+            exists = (response.headers.get('Content-Type') or response.headers.get("content-type") or "").lower().startswith("image/")
+            if not exists:
+                _candidate_event('invalid', fatal=True)
+            elif current_history_context() is not None and not next(response.iter_content(chunk_size=1), b''):
+                _candidate_event('invalid', fatal=True)
             return exists
         except requests.RequestException:
+            _candidate_event('fault', fatal=True)
             return False
+        finally:
+            if response is not None:
+                response.close()
 
     def check_image_url(self, image_url: str) -> bool:
         """Distinguish absent slots (404/410) from transient source failures."""
@@ -83,14 +121,18 @@ class CWAService(BaseImageService):
             with http_get(image_url, timeout=15, stream=True,
                               headers=self.no_cache_headers(), verify=False) as response:
                 if response.status_code in (404, 410):
+                    _candidate_event('missing')
                     return False
                 response.raise_for_status()
                 if not (response.headers.get('Content-Type') or '').lower().startswith('image/'):
+                    _candidate_event('invalid', fatal=True)
                     raise RuntimeError('CWA URL did not return an image')
                 if not next(response.iter_content(chunk_size=1), b''):
+                    _candidate_event('invalid', fatal=True)
                     raise RuntimeError('CWA image response was empty')
                 return True
         except requests.RequestException:
+            _candidate_event('fault', fatal=True)
             raise RuntimeError('CWA image request failed') from None
 
     def fetch_rainfall_day_script(self) -> str:
@@ -109,7 +151,8 @@ class CWAService(BaseImageService):
         image_pattern: str,
         publish_delay_minutes: int,
     ) -> tuple[str, str] | None:
-        now = datetime.now(self.satellite_timezone).replace(second=0, microsecond=0)
+        context = current_history_context()
+        now = (context.now if context else datetime.now(self.satellite_timezone)).astimezone(self.satellite_timezone).replace(second=0, microsecond=0)
         delayed_now = now - timedelta(minutes=publish_delay_minutes)
         rounded_now = delayed_now - timedelta(minutes=delayed_now.minute % 10)
 
@@ -191,10 +234,14 @@ class CWAService(BaseImageService):
             if match:
                 filename = match.group("filename")
                 display_time = match.group("text").replace("/", "-")
+                datetime.strptime(display_time, '%Y-%m-%d %H:%M')
                 image_url = f"{self.radar_image_prefix}/{filename}"
                 return image_url, display_time
-        except requests.RequestException:
-            pass
+            _candidate_event('invalid', fatal=True)
+        except requests.RequestException as error:
+            _index_fault(error)
+        except (ValueError, TypeError):
+            _candidate_event('invalid', fatal=True)
 
         try:
             response = http_get(self.radar_source_url, timeout=10, verify=False)
@@ -207,8 +254,11 @@ class CWAService(BaseImageService):
                 candidate_time = datetime.strptime(timestamp, "%Y%m%d%H%M").replace(tzinfo=self.satellite_timezone)
                 display_time = candidate_time.strftime("%Y-%m-%d %H:%M")
                 return image_url, display_time
-        except requests.RequestException:
-            pass
+            _candidate_event('invalid', fatal=True)
+        except requests.RequestException as error:
+            _index_fault(error)
+        except (ValueError, TypeError):
+            _candidate_event('invalid', fatal=True)
 
         return self.resolve_latest_image(
             image_prefix=self.radar_image_prefix,
@@ -280,8 +330,11 @@ class CWAService(BaseImageService):
                 )
                 display_time = timestamp.strftime("%Y-%m-%d %H:%M")
                 return image_url, display_time
-        except requests.RequestException:
-            pass
+            _candidate_event('invalid', fatal=True)
+        except requests.RequestException as error:
+            _index_fault(error)
+        except (ValueError, TypeError):
+            _candidate_event('invalid', fatal=True)
 
         return self.resolve_latest_image(
             image_prefix=self.temperature_image_prefix,
@@ -323,8 +376,11 @@ class CWAService(BaseImageService):
                 )
                 display_time = timestamp.strftime("%Y-%m-%d %H:%M")
                 return image_url, display_time
-        except requests.RequestException:
-            pass
+            _candidate_event('invalid', fatal=True)
+        except requests.RequestException as error:
+            _index_fault(error)
+        except (ValueError, TypeError):
+            _candidate_event('invalid', fatal=True)
 
         return self.resolve_latest_image(
             image_prefix=self.rainfall_image_prefix,
@@ -404,8 +460,11 @@ class CWAService(BaseImageService):
                 )
                 display_time = timestamp.strftime("%Y-%m-%d %H:00")
                 return image_url, display_time
-        except requests.RequestException:
-            pass
+            _candidate_event('invalid', fatal=True)
+        except requests.RequestException as error:
+            _index_fault(error)
+        except (ValueError, TypeError):
+            _candidate_event('invalid', fatal=True)
 
         return self.resolve_direct_weather_chart_image_url()
 
@@ -446,8 +505,11 @@ class CWAService(BaseImageService):
                 image_date = datetime.strptime(match.group("date"), "%Y-%m-%d").replace(tzinfo=self.satellite_timezone)
                 display_time = image_date.strftime("%Y-%m-%d")
                 return image_url, display_time
-        except requests.RequestException:
-            pass
+            _candidate_event('invalid', fatal=True)
+        except requests.RequestException as error:
+            _index_fault(error)
+        except (ValueError, TypeError):
+            _candidate_event('invalid', fatal=True)
 
         return None
 
