@@ -12,10 +12,12 @@ function image(type, time = "2026-10-22T01:00:00+08:00") {
     image_time: time, fetched_at: "2026-10-21T17:05:00+00:00" };
 }
 
-function serve(type, { yesterday = false, historyFails = false } = {}) {
+function serve(type, { yesterday = false, historyFails = false, classification = "legacy", corrupt = "" } = {}) {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-22T01:05:00+08:00"));
-  const latest = image(type, yesterday ? "2026-10-21T23:50:00+08:00" : undefined);
+  const clock = type === "rainfall" ? "04:00" : type === "satellite" ? "11:00" : "01:00";
+  const latest = image(type, yesterday ? "2026-10-21T23:50:00+08:00"
+    : classification === "v2" ? `2026-10-22T${clock}:00+08:00` : undefined);
   const first = image(type, `2026-10-22T${type === "rainfall" ? "00:30" : "00:00"}:00+08:00`);
   const items = [first, latest];
   const request = vi.fn(async url => {
@@ -24,6 +26,21 @@ function serve(type, { yesterday = false, historyFails = false } = {}) {
     else if (url === `/data/images/${type}/history/2026-10-22.json`) {
       if (historyFails) return { ok: false, json: async () => ({}) };
       payload = { image_type: type, date: "2026-10-22", items, complete: false, missing: ["gap"], failed: [] };
+      if (classification === "v2") {
+        const fields = {pending:[],missing:[],failed:[],official_missing:[],legacy_unknown:[]};
+        const step = (type === "rainfall" ? 30 : 10) * 60000;
+        let index = 0;
+        for (let time = Date.parse(first.image_time) + step; time < Date.parse(latest.image_time); time += step) {
+          const stamp = new Date(time + 8 * 3600000).toISOString().slice(0,19) + "+08:00";
+          const field = type === "satellite" && stamp.includes("T10:40:") ? "official_missing"
+            : ["pending","missing","failed","legacy_unknown"][index++] || "pending";
+          fields[field].push(stamp);
+        }
+        payload = {...payload,schema_version:2,...fields};
+        if (corrupt === "version") payload.schema_version = 3;
+        if (corrupt === "array") payload.pending = null;
+        if (corrupt === "overlap") payload.pending.push(latest.image_time);
+      }
     } else if (url === "/data/images/rainfall/daily/latest.json") {
       payload = { date: "2026-10-22", items: ["今日", "昨日", "前日"].map((label, index) => ({
         ...image("rainfall_daily"), label, represented_date: `2026-10-${22 - index}`,
@@ -56,6 +73,45 @@ test.each(["radar", "satellite", "rainfall"])("%s opens latest, switches current
   fireEvent.change(select, { target: { value: first.image_time } });
   expect(screen.getByAltText(first.title).getAttribute("src")).toBe(first.image_url);
   expect(request.mock.calls.every(([url]) => !url.includes("/api/"))).toBe(true);
+});
+
+test.each(["radar", "satellite", "rainfall"])("%s v2 reports separate classes and keeps only verified options", async type => {
+  const {latest,first} = serve(type,{classification:"v2"});
+  render(<MemoryRouter initialEntries={[`/images/${type}`]}><App /></MemoryRouter>);
+  await screen.findByAltText(latest.title);
+  for (const part of ["尚未探查", "已確認缺圖 1", "請求／驗證失敗 1", "舊版分類不明 1"])
+    expect(await screen.findByText(new RegExp(part))).toBeTruthy();
+  if (type === "satellite") expect(screen.getByText(/既定排除 1/)).toBeTruthy();
+  const select = screen.getByRole("combobox");
+  expect(within(select).getAllByRole("option")).toHaveLength(2);
+  fireEvent.change(select,{target:{value:first.image_time}});
+  expect(screen.getByAltText(first.title)).toBeTruthy();
+});
+
+test("legacy incomplete history is explicitly ambiguous", async () => {
+  serve("radar");
+  render(<MemoryRouter initialEntries={["/images/radar"]}><App /></MemoryRouter>);
+  expect(await screen.findByText(/舊版缺漏 1，無法可靠區分/)).toBeTruthy();
+});
+
+test("complete older history does not claim to cover the newer latest", async () => {
+  const {latest,first,request}=serve("radar",{classification:"v2"});
+  vi.stubGlobal("fetch",async url => url.includes("/history/") ? {ok:true,json:async()=>({
+    image_type:"radar",date:"2026-10-22",schema_version:2,items:[first],range_end:first.image_time,complete:true,
+    pending:[],missing:[],failed:[],official_missing:[],legacy_unknown:[],
+  })}:request(url));
+  render(<MemoryRouter initialEntries={["/images/radar"]}><App /></MemoryRouter>);
+  expect(await screen.findByText(/歷史清單尚未涵蓋最新圖/)).toBeTruthy();
+  expect(screen.queryByText(/當日清單完整/)).toBeNull();
+  expect(screen.getByRole("combobox").value).toBe(latest.image_time);
+});
+
+test.each(["version","array","overlap"])("bad history %s still displays latest", async corrupt => {
+  const {latest}=serve("radar",{classification:"v2",corrupt});
+  render(<MemoryRouter initialEntries={["/images/radar"]}><App /></MemoryRouter>);
+  expect(await screen.findByAltText(latest.title)).toBeTruthy();
+  expect(await screen.findByText(/時次資料讀取失敗/)).toBeTruthy();
+  expect(screen.getByRole("combobox").value).toBe(latest.image_time);
 });
 
 test("previous-day latest is labelled and never offered as today's history", async () => {

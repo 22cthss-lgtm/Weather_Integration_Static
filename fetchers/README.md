@@ -197,14 +197,19 @@ Fetcher 先確認最新有效圖片，再以原 CWAService 時次產生器與網
 | 輸出路徑（相對 frontend/public） | 結構 |
 | --- | --- |
 | data/images/{type}/latest.json | 原七欄位圖片物件 |
-| data/images/{type}/history/YYYY-MM-DD.json | image_type、date、timezone、updated_at、range_start/end、expected_count、complete、missing[]、failed[]、items[] |
+| data/images/{type}/history/YYYY-MM-DD.json | schema_version=2、image_type、date、timezone、updated_at、range_start/end、expected_count、complete、pending[]、missing[]、failed[]、official_missing[]、legacy_unknown[]、items[] |
 | data/images/rainfall/daily/latest.json | date、timezone、fetched_at、items[]（三張官方單日圖） |
 | data/rainfall/rankings/latest.json | source、dataset_id、fetched_at、rankings（各期間） |
 
 history.items 每筆保留七個圖片欄位，依 image_time 升冪排列。
 相同日期重跑以時刻去重並合併，只新增已驗證資料，先前成功紀錄不因缺圖消失。
-全部候選都失敗／不存在時不覆蓋舊日期檔。部分成功可以累積，但 complete=false
-及 missing/failed 清單明示缺漏；有 failed 時命令非零退出。
+明確 CLI 全部候選都失敗／不存在時不覆蓋舊日期檔。部分成功可以累積；
+有界 due 流程的未探查時次列 pending，404／410 列 missing，實際請求／驗證異常列 failed，
+既定衛星排除列 official_missing，舊版無可靠證據的混合缺漏列 legacy_unknown。
+五種清單與 items 互斥、完整涵蓋範圍；五種清單皆空才 complete=true。
+歷史缺漏不阻擋有效 latest 更新；產品退出結果不等同歷史全部成功。
+無 schema_version 的舊 history 仍按舊契約驗證、恢復原 bytes；僅當日重寫時升為 v2，
+可用相容私有 state 辨別者沿用證據，其餘保留 legacy_unknown，直到真正探查。
 沒有任意跨日查詢 UI；不自動刪除舊檔，也不承諾官方 URL 的長期可用性。
 
 最新圖片時刻帶 +08:00，抓取／寫入時間是 UTC。

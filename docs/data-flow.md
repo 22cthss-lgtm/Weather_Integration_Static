@@ -1,9 +1,9 @@
 # 資料來源、更新流程與恢復保護
 
-- 盤點日期：2026-11-02（Asia/Taipei）。
-- 程式基準：`main`，commit `03ea1dc846a693cb5d2b9cf2a84f14eb2fb38219`。
-- 依據：直接閱讀入口、Services、發布／快照、workflow 與前端程式；2026-11-02 另完成本機隔離真實來源驗證（第 8 節）。未執行雲端／部署或瀏覽器驗收。
-- 本文件包含 2026-11-02 本批尚未提交的 CWA／KMA fallback 修正、SST 非空檢查、E/F 狀態選取／補部署修正及相關測試；上述 commit 是基底，不包含這些修改。workflow 僅調整手動流程接線，仍無 schedule；前端未改。既有未提交公開 JSON／歷史資料均不是本批產生，不代表已部署版本。
+- 盤點日期：2026-11-03（Asia/Taipei）。
+- 程式基準：`main`，commit `5914016a5e315c845dbbe4ba07985305d5ce51e3`。
+- 依據：直接閱讀入口、Services、發布／快照、workflow 與前端程式；隔離真來源結果見第 8 節，先前手動雲端結果見本機 HANDOFF 第 14 節及本文第 11 節的界線摘要。
+- 本文件包含以基準 commit 為基底新增的 history v2 分類、相容驗證及前端提示修改（第 11 節）。來源 fallback 與 E/F 已在基準 commit；workflow 仍無 schedule。本批保留所有既有公開 JSON 修改，沒有真實抓取或部署；不能把隔離測試當作線上驗收。
 - **維護要求：之後修改資料流、Fetcher、恢復／發布或前端讀取行為時，應同步更新本文件、盤點日期與程式基準。**
 
 HANDOFF.md 與本機 .runtime 驗收證據不納入版本控制；相關連結供本機維護使用。
@@ -154,18 +154,18 @@ flowchart TD
 
 | 狀態 | 項目 | 維護時的判斷 |
 | --- | --- | --- |
-| 本批已修，未提交／未線上驗收 | 溫度／雨量／雷達 | 官方索引解析與候選驗圖後備已接通；metadata 失敗不再一律提前 fatal。具體路徑及限制見下方 fallback 盤點。 |
-| 本批已修，隔離真來源後備成功 | Weather Chart | 已獨立模擬證明：無匹配／壞時間的 HTML 會阻止固定圖後備，合法 metadata 候選 404 也會提前 return；本批已修。初次唯讀診斷受環境網路限制；第 8 節已確認目前 HTML 無預期時間參數、固定圖後備有效。沒有 10/30 完整頁面證據，也未部署。 |
-| 本批已修，未雲端驗收 | state 選舊 | 下載並驗證最多十二個候選，按 scheduler.saved_at 的 UTC 時刻選最新相容者；同時刻才用 artifact ID 作確定性 tie-break。 |
+| 已提交，正常雲端來源驗收通過 | 溫度／雨量／雷達 | 官方索引解析與候選驗圖後備已接通；metadata 失敗不再一律提前 fatal。未觸發的後備仍只有模擬證據。 |
+| 已提交，隔離真來源後備成功 | Weather Chart | 已修無匹配／壞時間 HTML 與 metadata 候選 404 提前中止 fallback 的問題。第 8 節確認當時 HTML 無預期時間參數、固定圖後備有效，已隨 5914016／Run9 發布；沒有 10/30 完整頁面故障證據。 |
+| 已提交，多候選亂序仍僅模擬 | state 選舊 | 下載並驗證最多十二個候選，按 scheduler.saved_at 的 UTC 時刻選最新相容者；同時刻才用 artifact ID 作確定性 tie-break。 |
 | 本批已修，未雲端驗收 | 已存未部署後無變更 | 正式手動流程已接可信線上 marker／版本校驗；內容是否改變與是否需部署分開，已存未上線可補部署；未知／較新線上版本及失敗邊界見第九節。 |
-| 已知問題 | pending 與失敗混用 | 內部 gap 有 pending，但公開 history 將未探查時次放 failed[]；不能將 failed 全部當真實來源故障。 |
+| 已修，線上驗收前紀錄 | pending 與失敗混用 | 新產生 history v2 分五類；舊版不猜分類，見第 11 節。現有線上舊 JSON 的 failed 仍不能全當真實故障。 |
 | 已知限制 | 子資源診斷 | history／daily 失敗可能不使本機整產品報錯；成功檢查與部分資源失敗應分開看。 |
-| 提案，待確認 | 首次歷史建檔與補查 | 目前共用每輪十二次限制；拆分初查／重試預算、公開分類與 UI 提示尚未實作，新數值未定。 |
+| 提案，待確認 | 首次歷史建檔與補查 | 目前仍共用每輪十二次限制；拆分初查／重試預算未實作，新數值未定。本批只有分類與提示，沒有調整策略。 |
 | 待檢視 | 雷達／衛星保守延遲 | 現行 fallback／探查使用 20／30 分鐘延遲，是程式策略，不是已驗證的官方發布週期。 |
 | 提案，未啟用 | 定時抓取／部署 | workflow 尚無 schedule；事件預設值、手動／排程混合驗收及正式啟用仍待確認。 |
 | 未定案 | 長期保存／歷史清理 | 七天只是測試設定；未實作新的長期政策，不得擅自刪除歷史或續期舊包。 |
 
-## 7. 本批 fallback 失敗路徑盤點（2026-11-02，未提交）
+## 7. fallback 失敗路徑盤點（2026-11-02 當時紀錄，已納入 5914016）
 
 ### 可恢復與必須停止的分界
 
@@ -195,11 +195,11 @@ flowchart TD
 
 新增測試見 [test_source_fallbacks.py](../fetchers/tests/test_source_fallbacks.py)；與既有分類、圖片、群組、HTTP、current-day、SST、排行及 due 測試配合。測試使用模擬 transport 與專案內暫存目錄，不發布測試資料。獨立審查另將既存完整官方溫度／雨量 JS 餵入新 parser，結果符合舊證據；它仍不是修後真實來源驗收。
 
-**當時未驗證／未納入：** 上述第 7 節模擬盤點階段未執行真實 Fetcher 更新、手動雲端驗收、瀏覽器互動或部署；後續真來源結果見第 8 節。Weather Chart 初次唯讀頁面連線失敗，不能只憑該次結果判斷官方故障。首次本機測試的 SST Session 曾漏攔截，已修並以全域阻網測試複查。公開 JSON 在本批期間被外部工作改動，不算本批來源驗證，未覆蓋或還原。該階段狀態選舊、補部署缺口尚未修；後續 E/F 修正見第九節。歷史 pending 分類與建檔最佳化仍未修。
+**當時未驗證／未納入：** 上述第 7 節模擬盤點階段未執行真實 Fetcher 更新、手動雲端驗收、瀏覽器互動或部署；後續真來源結果見第 8 節。Weather Chart 初次唯讀頁面連線失敗，不能只憑該次結果判斷官方故障。首次本機測試的 SST Session 曾漏攔截，已修並以全域阻網測試複查。公開 JSON 在本批期間被外部工作改動，不算本批來源驗證，未覆蓋或還原。該階段狀態選舊、補部署缺口尚未修；後續 E/F 修正見第九節。當時歷史 pending 分類與建檔最佳化仍未修；分類後續修正見第 11 節，建檔策略維持不變。
 
 ## 8. 本機隔離真實來源驗證（2026-11-02）
 
-- 基底 commit 與尚未提交修正同本文開頭。使用正式 prepare_due／Service／驗證／hash／封裝，所有輸出限制在新的 `.runtime/source-live-20261102T101206Z`，不寫 public 或既有快照指標。
+- 當時基底 commit 為 `03ea1dc846a693cb5d2b9cf2a84f14eb2fb38219` 加未提交來源修正，之後納入 5914016；不含本批 history v2。使用正式 prepare_due／Service／驗證／hash／封裝，所有輸出限制在新的 `.runtime/source-live-20261102T101206Z`，不寫 public 或既有快照指標。
 - 18:12:09～18:13:28（台北），十三項來源檢查皆成功；其中溫度、TCHP、排行、KMA、SST 五項內容未變，成功檢查後保留 seed 原 bytes。
 - **79.142 秒、60 次請求（59 個 200＋1 個 404）**；CWA 23、KMA 3、JMA 2、CIMSS 18、NSIDC 14，全部未耗盡預算、blocked=false。逐項耗時、時間及來源路徑見 [本機驗收報告](../.runtime/source-live-20261102T101206Z/acceptance-report.md)。這是本機證據，不是 GitHub artifact。
 - 實際時間：溫度 11/02 17:00、雨量／雷達 18:00、衛星 17:40（皆台北）；KMA 15:00 +09:00（台北14:00）；SST 日期11/01，TCHP日期10/29；排行觀測18:00。CIMSS／海冰各子圖與 Weather Chart 的產品時間均合法保留 null。
@@ -211,7 +211,7 @@ flowchart TD
 - 第一輪 `.runtime/source-live-20261102T101104Z` 因預設環境網路限制，五來源各三次ConnectionError後封鎖，44.772秒；十三項失敗且26檔原bytes保留、不產新資料ZIP、不判部署。不是官方來源故障。經工具核准網路權限後才完成上述成功批。
 - **仍未驗證**：未觸發的HTML／時間等fallback與故障分支只經前批模擬；未執行workflow、artifact上傳、部署、瀏覽器或排程驗收。候選deploy=true只是決策，沒有發布。群組hash在本機bootstrap建立基準，不能把所有版本變更解讀成官方新圖。
 
-## 9. 狀態最新選取與部署恢復（2026-11-02，未提交）
+## 9. 狀態最新選取與部署恢復（2026-11-02 當時紀錄，已納入 5914016）
 
 ### 狀態選取
 
@@ -254,3 +254,37 @@ flowchart TD
 - [AGENTS](../AGENTS.md)：程式修改後主代理驗證與獨立 Sub-Agent 審查流程。
 
 後續若改動入口、Service、來源 URL、候選／fallback、JSON 契約、狀態保存、快照期限或發布條件，需更新相應段落；保持「目前行為」「已知問題」「提案」分離。文件本身不能作為 GitHub 操作或排程啟用授權。
+
+## 11. 歷史狀態分類 v2（2026-11-03，提交前盤點）
+
+### 現況與相容性
+
+[current_day.py](../fetchers/src/current_day.py) 與 [history_reconciliation.py](../fetchers/src/history_reconciliation.py) 新寫入的雷達、衛星、雨量 history 使用 `schema_version: 2`。`items` 仍只有已驗證成功的圖片；其餘時次分為：
+
+| 欄位 | 意義／證據 |
+| --- | --- |
+| pending | 尚未探查，沒有請求失敗證據；每輪預算用完後仍待查的時次留在此類 |
+| missing | 實際圖片探查回覆 404／410；不是永久缺測，仍依原重試政策處理 |
+| failed | 真正請求或圖片／資料驗證異常；不代表整個產品更新失敗 |
+| official_missing | 現有衛星 10:40、22:40 排除規則；不發請求，不能混作本輪真 404 |
+| legacy_unknown | 舊版混合缺漏無可靠證據可判別；不猜成 pending 或真失敗，真正探查後才更新分類 |
+
+五類與 items 互斥，合起來完整涵蓋 `range_start`～`range_end` 的 expected_count。範圍仍只到有效 latest，不把其後未發布時次列缺漏；五類全空才 complete=true。[snapshots.validate_resource](../fetchers/src/snapshots.py) 校驗版本、精確欄位、時區／時間格點、排序／去重、完整分割及既定排除。
+
+無 schema_version 的 v1 繼續按原契約驗證；混合新舊快照可封裝、恢復且舊 bytes 不變，不重寫過去日期。當日下一次正常 reconciliation 才寫 v2：同內容版本相容私有 gap state 若有一致分類與 attempts／last_attempt_at 證據，沿用該分類；否則舊 missing／failed 留 legacy_unknown。已驗證 v2 公開分類在私有 state 缺失時仍保留；原重試計數能否恢復仍取決於既有 state 恢復機制，並未新增保存政策。未支援的明示版本或不合法分割拒絕發布／封裝，避免把格式問題當零缺漏。
+
+latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗均不阻擋有效最新圖。history 寫入失敗保留前次檔案，仍可能與較新的 latest 不同時；不能因舊圖可用而宣稱本輪來源成功。
+
+[history-status.js](../frontend/src/history-status.js) 與 [useCurrentImage.js](../frontend/src/useCurrentImage.js) 在原提示位置顯示五類數量，選單只含成功項目及有效 latest，沒有新增版面或操作。舊清單明示分類不明；不支援／壞 v2 清單顯示讀取失敗、仍顯示 latest。history 落後 latest 時不稱當日完整。
+
+### 驗證界線與後續驗收
+
+新測試 [test_history_contract_v2.py](../fetchers/tests/test_history_contract_v2.py) 覆蓋分類、十二次上限、舊版歧義及相容 state、既定排除、latest 不受 pending 阻擋、混合版本快照 ZIP 還原原 bytes；前端 [current-day.test.jsx](../frontend/src/current-day.test.jsx)／[history-status.test.js](../frontend/src/history-status.test.js) 覆蓋三頁分類、切換、舊版、壞格式與落後清單。這些是模擬／隔離測試，不是線上來源驗收。
+
+主代理阻網 Python 全套 237/237，補強後 v2 模組 9/9、前端全套 90/90、隔離 production build 通過。獨立 Reviewer 自行阻網 Python 相關五模組 57/57，新增測試後 v2 模組再跑 9/9（共 59 個不同相關測試），前端四檔 65/65，另恢復既有 Run11 ZIP，28/28 bytes／content_id 一致；舊版快照沒有因新分類而被改寫。
+
+提交前再驗證：主代理全套 Python 239/239、前端 90/90。獨立審查發現快照測試固定日期會與 CI 注入的當日 history 衝突；測試已改挑 seed 中不存在的隔離日期，主代理在本機 seed 與真 Run11 seed 均通過，沒有放寬正式格點校驗。
+
+實際瀏覽器驗證尚未完成：IAB 連 localhost 逾時，Windows Computer Use 因無法可靠辨認目前瀏覽器網址停止，雙方未繼續 UI 操作。上線後仍需逐頁核對文字與選圖、逐檔 SHA／marker、artifact 恢復及正常 refresh。原 Run9～11 已驗證正常發布、一次拒絕部署時舊站保留、下輪恢復失敗 Run 的可信包／state；但自然歷史變更，**無內容變化沿用原 ZIP 補部署／同版本跳過部署仍僅模擬**，不能冒稱已通過線上驗收。
+
+本批沒有調整每輪十二次、補查頻率／上限、發布延遲、來源預算或歷史保存策略，沒有真實抓取、修改 public JSON、commit、push、部署或啟用排程。首次建檔／補查策略最佳化仍只是提案；自動排程仍須後續另行確認與驗收。

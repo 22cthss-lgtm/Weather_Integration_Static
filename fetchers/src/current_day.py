@@ -10,7 +10,7 @@ import re
 
 from .publication import atomic_write_json, validate_image
 from .services.cwa_service import CWAService
-from .history_reconciliation import current_history_context
+from .history_reconciliation import GAP_FIELDS, OFFICIAL_MISSING, current_history_context
 
 CURRENT_PRODUCTS = ('radar', 'satellite', 'rainfall')
 
@@ -34,6 +34,8 @@ def publish_current_history(service, latest, output_root, now=None):
     build_url = getattr(service, f'build_{kind}_image_url')
 
     def probe(slot):
+        if slot.strftime('%H:%M') in OFFICIAL_MISSING.get(kind, ()):
+            return slot, None, 'official_missing'
         url = build_url(slot)
         try:
             if not service.check_image_url(url):
@@ -55,33 +57,48 @@ def publish_current_history(service, latest, output_root, now=None):
             raise RuntimeError(f'{kind}: no verified slots; previous history preserved')
     output = Path(output_root) / kind / 'history' / f'{end.date()}.json'
     existing = []
+    prior_gaps = {}
     if output.exists():
         previous = json.loads(output.read_text(encoding='utf-8'))
+        from .snapshots import validate_resource
+        validate_resource(f'images/{kind}/history/{end.date()}.json', previous)
         if previous.get('date') != end.date().isoformat() or previous.get('image_type') != kind:
             raise RuntimeError('Existing history date/type is inconsistent')
         existing = previous['items']
+        if previous.get('schema_version') == 2:
+            prior_gaps = {stamp: field for field in GAP_FIELDS for stamp in previous[field]}
+        else:
+            # v1 failed may mean pending, and missing may include exclusions.
+            # Without compatible private state, preserve uncertainty until probed.
+            prior_gaps = {stamp: 'legacy_unknown' for field in ('missing','failed') for stamp in previous[field]}
         for item in existing:
             validate_image(kind, item)
             if datetime.fromisoformat(item['image_time']).astimezone(service.satellite_timezone).date() != end.date():
                 raise RuntimeError('Existing history has a wrong-day item')
     if context:
         validate_image(kind,asdict(latest))
-        items, missing, failed = context.reconcile(kind,slots,existing,asdict(latest),probe)
+        items, gaps = context.reconcile(kind,slots,existing,asdict(latest),probe,prior_gaps)
     else:
         merged = {item['image_time']: item for item in existing}
         for _, item, status in results:
             if status is None: merged.setdefault(item['image_time'], item)
         items = list(merged.values())
-        missing = [slot.isoformat() for slot, _, status in results if status == 'missing']
-        failed = [slot.isoformat() for slot, _, status in results if status == 'failed']
+        gaps = {field: [] for field in GAP_FIELDS}
+        for slot, _, status in results:
+            # Previously verified items remain authoritative even if re-probing
+            # their remote URLs fails now; never emit overlapping partitions.
+            if slot.isoformat() not in merged and status is not None:
+                gaps[status].append(slot.isoformat())
     data = {
-        'image_type': kind, 'date': end.date().isoformat(), 'timezone': 'Asia/Taipei',
+        'schema_version': 2, 'image_type': kind, 'date': end.date().isoformat(), 'timezone': 'Asia/Taipei',
         'updated_at': datetime.now(timezone.utc).isoformat(),
         'range_start': slots[0].isoformat(), 'range_end': end.isoformat(),
-        'expected_count': len(slots), 'complete': not missing and not failed,
-        'missing': missing, 'failed': failed,
+        'expected_count': len(slots), 'complete': not any(gaps.values()),
+        **gaps,
         'items': sorted(items, key=lambda item: item['image_time']),
     }
+    from .snapshots import validate_resource
+    validate_resource(f'images/{kind}/history/{end.date()}.json', data)
     return atomic_write_json(data, output)
 
 

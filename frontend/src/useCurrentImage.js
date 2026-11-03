@@ -1,6 +1,7 @@
 import { formatImageDate } from "./image-time";
 import { useEffect, useState } from "react";
 import { fetchCurrentImageHistory, fetchLatestImage } from "./api";
+import { historyStatus } from "./history-status";
 
 export function taipeiDate(value = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -39,8 +40,10 @@ export default function useCurrentImage(type) {
           const byTime = new Map(data.items.filter(item => taipeiDate(item.image_time) === today)
             .map(item => [item.image_time, item]));
           byTime.set(latest.image_time, latest);
+          const message = historyStatus(data, byTime.size);
           setHistory([...byTime.values()].sort((a, b) => a.image_time.localeCompare(b.image_time)));
-          if (!data.complete) setStatus("部分時次尚未取得，僅列出已成功發布的圖片。");
+          setStatus(data.range_end && data.range_end < latest.image_time
+            ? `${data.complete ? `已取得 ${byTime.size} 個時次。` : message} 歷史清單尚未涵蓋最新圖；仍顯示最新成功圖片。` : message);
         } catch {
           if (active) {
             setHistory([latest]);

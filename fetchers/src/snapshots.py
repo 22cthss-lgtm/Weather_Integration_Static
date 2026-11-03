@@ -89,8 +89,13 @@ def validate_resource(path, data):
         elif re.fullmatch(r'images/(radar|satellite|rainfall)/history/\d{4}-\d{2}-\d{2}\.json', path):
             kind, day = path.split('/')[1], Path(path).stem
             date.fromisoformat(day)
-            exact(data, {'image_type', 'date', 'timezone', 'updated_at', 'range_start', 'range_end',
-                         'expected_count', 'complete', 'missing', 'failed', 'items'})
+            from .history_reconciliation import GAP_FIELDS, OFFICIAL_MISSING
+            v2 = 'schema_version' in data
+            if v2 and (type(data['schema_version']) is not int or data['schema_version'] != 2):
+                raise ValueError('Unsupported history schema version')
+            fields = {'image_type', 'date', 'timezone', 'updated_at', 'range_start', 'range_end',
+                      'expected_count', 'complete', 'missing', 'failed', 'items'}
+            exact(data, fields | ({'schema_version', *GAP_FIELDS} if v2 else set()))
             if data['image_type'] != kind or data['date'] != day or data['timezone'] != 'Asia/Taipei':
                 raise ValueError('History path/date mismatch')
             instant(data['updated_at'], utc=True)
@@ -118,10 +123,23 @@ def validate_resource(path, data):
                 raise ValueError('Invalid history gaps')
             if len(set(missing)) != len(missing) or len(set(failed)) != len(failed):
                 raise ValueError('Duplicate history gaps')
-            if set(times) | set(missing) | set(failed) != slots or set(missing) & set(failed):
+            if not v2 and (set(times) | set(missing) | set(failed) != slots or set(missing) & set(failed)):
                 raise ValueError('History inventory does not account for every slot')
             if type(data['complete']) is not bool or data['complete'] != (not missing and not failed):
-                raise ValueError('Invalid history completeness')
+                if not v2:
+                    raise ValueError('Invalid history completeness')
+            if v2:
+                accounted = set(times)
+                for field in GAP_FIELDS:
+                    values = data[field]
+                    if (not isinstance(values, list) or any(not isinstance(t, str) or t not in slots for t in values)
+                            or values != sorted(set(values)) or accounted.intersection(values)):
+                        raise ValueError('Invalid or overlapping history classification')
+                    accounted.update(values)
+                if accounted != slots or type(data['complete']) is not bool or data['complete'] != (not any(data[f] for f in GAP_FIELDS)):
+                    raise ValueError('Incomplete history classification partition')
+                if any(t[11:16] not in OFFICIAL_MISSING.get(kind, ()) for t in data['official_missing']):
+                    raise ValueError('Unknown official exclusion')
         elif path == 'images/rainfall/daily/latest.json':
             exact(data, {'date', 'timezone', 'fetched_at', 'items'})
             day = date.fromisoformat(data['date'])

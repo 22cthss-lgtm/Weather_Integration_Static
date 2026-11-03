@@ -40,7 +40,7 @@ class HistoryTests(unittest.TestCase):
                 self.assertEqual(check.call_count,12)
                 self.assertEqual(len(first['items']),1)
                 self.assertEqual(first['expected_count'],73)
-                self.assertEqual(len(again['items'])+len(again['missing'])+len(again['failed']),73)
+                self.assertEqual(len(again['items'])+sum(len(again[f]) for f in h.GAP_FIELDS),73)
                 statuses = ctx.gaps['radar']['2026-10-29']
                 self.assertIn('pending',{v['classification'] for v in statuses.values()})
                 self.assertEqual(ctx.outcomes['radar']['history_state'],'incomplete')
@@ -71,7 +71,8 @@ class HistoryTests(unittest.TestCase):
             with h.history_scope(policy,{},NOW) as ctx:
                 with patch.object(service,'check_image_url',return_value=True) as check:
                     result = publish_current_history(service,self.latest(service,'satellite'),directory)
-                self.assertIn('2026-10-29T10:40:00+08:00',result['missing'])
+                self.assertIn('2026-10-29T10:40:00+08:00',result['official_missing'])
+                self.assertNotIn('2026-10-29T10:40:00+08:00',result['missing'])
                 self.assertEqual(ctx.gaps['satellite']['2026-10-29']['10:40']['classification'],'official_missing')
                 self.assertEqual(check.call_count,71)
 

@@ -10,7 +10,9 @@ from threading import RLock
 
 _CONTEXT = ContextVar('current_history_context', default=None)
 KINDS = frozenset(('radar','satellite','rainfall'))
-CLASSES = frozenset(('pending','missing','failed','success','official_missing','stopped'))
+GAP_FIELDS = ('pending', 'missing', 'failed', 'official_missing', 'legacy_unknown')
+OFFICIAL_MISSING = {'satellite': frozenset(('10:40', '22:40'))}
+CLASSES = frozenset((*GAP_FIELDS, 'success', 'stopped'))
 TAIPEI = timezone(timedelta(hours=8))
 
 
@@ -115,24 +117,34 @@ class HistoryContext:
         with self._lock:
             self.outcomes.setdefault(kind,{}).update(values)
 
-    def reconcile(self, kind, slots, existing, latest, probe):
+    def reconcile(self, kind, slots, existing, latest, probe, prior_gaps=None):
         """Reuse validated inventory/latest; probe only budgeted eligible slots."""
         with self._lock:
             day = slots[0].date().isoformat()
             records = self.gaps.setdefault(kind,{}).setdefault(day,{})
             merged = {datetime.fromisoformat(item['image_time']).astimezone(TAIPEI).isoformat():item for item in existing}
             merged.setdefault(datetime.fromisoformat(latest['image_time']).astimezone(TAIPEI).isoformat(),latest)
-            missing, failed = [], []
+            gaps = {field: [] for field in GAP_FIELDS}
             for slot in slots:
                 key = slot.strftime('%H:%M')
                 stamp = slot.isoformat()
-                gap = records.setdefault(key,{'classification':'pending','attempts':0,'last_attempt_at':None,'next_retry_at':None})
+                gap = records.setdefault(key,{'classification':(prior_gaps or {}).get(stamp,'pending'),
+                                             'attempts':0,'last_attempt_at':None,'next_retry_at':None})
                 if stamp in merged:
                     gap.update(classification='success',next_retry_at=None)
                     continue
+                classification = gap['classification']
+                supported = (classification == 'pending' and gap['attempts'] == 0 and gap['last_attempt_at'] is None
+                             or classification in ('missing', 'failed') and gap['attempts'] > 0 and gap['last_attempt_at'] is not None
+                             or classification == 'legacy_unknown'
+                             or classification == 'official_missing' and key in OFFICIAL_MISSING.get(kind, ()))
+                if not supported:
+                    # A legacy mixed list plus contradictory private metadata
+                    # is not evidence of a real request failure.
+                    gap['classification'] = (prior_gaps or {}).get(stamp, 'legacy_unknown')
                 # Official CWA O-B0028_B0032 product schedule excludes 10:40
                 # and 22:40; keep them publicly missing without repeat probes.
-                if kind == 'satellite' and key in ('10:40','22:40'):
+                if key in OFFICIAL_MISSING.get(kind, ()):
                     gap.update(classification='official_missing',next_retry_at=None)
                 elif _eligible(gap,self.now,self.policy) and self._spent.get(kind,0) < self.policy['max_slots_per_run']:
                     self._spent[kind] = self._spent.get(kind,0) + 1
@@ -143,12 +155,11 @@ class HistoryContext:
                     if item is not None:
                         merged[stamp] = item
                         continue
-                # Pending means unobserved, so expose as failed (unknown),
-                # never invent a source 404 in the public missing array.
-                (missing if gap['classification'] in ('missing','official_missing') else failed).append(stamp)
-            state = 'complete' if not missing and not failed else 'incomplete'
+                classification = gap['classification']
+                gaps[classification if classification in GAP_FIELDS else 'legacy_unknown'].append(stamp)
+            state = 'complete' if not any(gaps.values()) else 'incomplete'
             self.outcome(kind,history_state=state)
-            return list(merged.values()), missing, failed
+            return list(merged.values()), gaps
 
 
 @contextmanager
