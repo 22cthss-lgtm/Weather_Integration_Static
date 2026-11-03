@@ -63,6 +63,13 @@ class PagesWorkflowTests(unittest.TestCase):
         self.assertEqual(inputs['snapshot_source']['default'], 'auto')
         self.assertEqual(inputs['snapshot_sha256']['required'], 'false')
         steps = workflow['jobs']['build']['steps']
+        pages = next(i for i,s in enumerate(steps) if s.get('id') == 'pages')
+        online = next(i for i,s in enumerate(steps) if 'manage_snapshots.py deployment' in s.get('run',''))
+        prepare = next(i for i,s in enumerate(steps) if 'refresh_pages.py prepare' in s.get('run',''))
+        self.assertLess(pages,online)
+        self.assertLess(online,prepare)
+        self.assertEqual(steps[online]['env']['SITE_URL'],'${{ steps.pages.outputs.base_url }}')
+        self.assertNotIn('if',steps[pages])
         recorded = next(step for step in steps if step.get('name') == 'Record selected code and data')
         self.assertEqual(recorded['env']['ASSET_SHA'], '${{ steps.resolve.outputs.sha256 || inputs.snapshot_sha256 }}')
         scripts = '\n'.join(step.get('run', '') for step in steps)

@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 from src.pages_refresh import summary_markdown, validate_inputs, validate_run
-from src.due_refresh import load_policy, prepare_due
+from src.due_refresh import DeploymentSafetyError, load_policy, prepare_due
 
 
 def main(argv=None):
@@ -44,10 +44,21 @@ def main(argv=None):
                     state_document = json.loads(state_path.read_text())
                 except (ValueError, OSError):
                     state_document = {}  # Engine reports corrupt and resets safely.
+            online = {'state': 'unavailable'}
+            online_path = Path(os.environ.get('RUNNER_TEMP', '')) / 'online-deployment.json'
+            if online_path.is_file():
+                try:
+                    if online_path.stat().st_size > 16384:
+                        raise ValueError('Oversized online status')
+                    online = json.loads(online_path.read_text(encoding='utf-8'))
+                    if not isinstance(online, dict):
+                        raise ValueError('Invalid online status')
+                except (ValueError, OSError):
+                    online = {'state': 'invalid'}
             result = prepare_due(os.environ['ARCHIVE'], os.environ['ASSET_SHA'], os.environ['WORK'],
                                  mode=os.environ['MODE'], policy=load_policy(), update=update,
-                                 state_document=state_document)
-            if result['deploy']:
+                                 state_document=state_document, deployment_document=online)
+            if result['deploy'] or result['save_snapshot']:
                 marker = {'schema_version': 1, 'content_id': result['content_id'],
                           'code_sha': os.environ.get('GITHUB_SHA', 'local'),
                           'run_id': os.environ.get('GITHUB_RUN_ID', 'local'),
@@ -64,6 +75,12 @@ def main(argv=None):
             if result['reason'] == 'candidate_not_publishable':
                 return 1
         return 0
+    except DeploymentSafetyError as error:
+        message = 'Deployment safety check stopped preparation: ' + error.reason
+        print(message, file=sys.stderr)
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+            summary.write('\n' + message + '\nNo data artifact or deployment was authorized.\n')
+        return 1
     except (ValueError, OSError, KeyError, TypeError):
         print('Manual Pages preparation failed; deployment must stop. Check selected input, policy and secret configuration.', file=sys.stderr)
         return 1

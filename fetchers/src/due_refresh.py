@@ -15,8 +15,41 @@ from .snapshot_runner import belongs, run_candidate
 from .snapshots import read_resources
 
 
+class DeploymentSafetyError(ValueError):
+    """A fixed safe diagnostic, never an upstream exception or credential."""
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(reason)
+
+
 def load_policy():
     return json.loads((Path(__file__).resolve().parents[1] / 'policies/due-runtime.json').read_text())
+
+
+def deployment_decision(mode, changed, content, checks, online, *, selected_content=None, products=None):
+    if mode == 'publish':
+        return True, 'explicit_publish'
+    if online is None:  # Offline callers retain the previous local-only contract.
+        return bool(changed), 'content_changed' if changed else 'no_content_change'
+    status = online.get('state')
+    if status != 'verified':
+        allowed = ('unavailable', 'invalid', 'untrusted', 'version_unknown', 'newer_run')
+        return False, 'online_' + (status if isinstance(status, str) and status in allowed else 'invalid')
+    if online['marker']['content_id'] == content['content_id']:
+        return False, 'already_online'
+    candidate_time = datetime.fromisoformat(content['content_created_at'].replace('Z', '+00:00'))
+    online_time = datetime.fromisoformat(online['content_created_at'].replace('Z', '+00:00'))
+    if candidate_time <= online_time:
+        return False, 'online_version_not_older'
+    if selected_content and selected_content['content_id'] != online['marker']['content_id']:
+        seed_time = datetime.fromisoformat(selected_content['content_created_at'].replace('Z', '+00:00'))
+        if seed_time <= online_time:
+            return False, 'seed_version_not_newer'
+    attempted = [c for c in checks.values() if c['state'] not in ('not_due', 'history_recheck')]
+    if not changed and ((attempted and all(c['state'] == 'retained_after_failure' for c in attempted))
+                        or (products and all(value == 'failed' for value in products.values()))):
+        return False, 'all_source_checks_failed'
+    return True, 'content_changed' if changed else 'saved_version_not_online'
 
 
 def _restore(document, selected, now, tasks, policy):
@@ -36,7 +69,7 @@ def _restore(document, selected, now, tasks, policy):
 
 
 def prepare_due(archive, sha256, work, *, mode, policy, task_config=None, state_document=None,
-                update=None, now=None, image_hasher=fetch_image_hashes):
+                update=None, now=None, image_hasher=fetch_image_hashes, deployment_document=None):
     now = now or datetime.now(timezone.utc)
     if now.utcoffset() is None or mode not in ('refresh', 'publish'):
         raise ValueError('Invalid due refresh mode or instant')
@@ -159,11 +192,21 @@ def prepare_due(archive, sha256, work, *, mode, policy, task_config=None, state_
         state_dir = work / 'state'
         state_dir.mkdir()
         atomic_write_json(state, state_dir / 'scheduler-state.json')
-        deploy = mode == 'publish' or bool(changed)
+        deploy, deployment_reason = deployment_decision(mode, changed, content, checks, deployment_document,
+                                                        selected_content=selected['content'], products=report['products'])
+        if deployment_reason == 'seed_version_not_newer' or (changed and not deploy
+                and deployment_reason != 'already_online'):
+            # Do not repackage an older seed with a fresh timestamp: a later
+            # auto run could otherwise mistake that saved package for newer data.
+            atomic_write_json({'data_changed': bool(changed), 'save_snapshot': False,
+                               'deploy': False, 'deployment_reason': deployment_reason},
+                              work / 'deployment-decision.json')
+            raise DeploymentSafetyError(deployment_reason)
         result = dict(report, deploy=deploy, save_snapshot=bool(changed), mode=mode,
+                      data_changed=bool(changed), deployment_reason=deployment_reason,
                       checks=checks, state_warning=state_warning, scheduler_state=state,
                       content_id=content['content_id'], content_created_at=content['content_created_at'])
-        if deploy:
+        if deploy or changed:
             if changed:
                 output = work / 'output/weather-snapshot.zip'
                 package = pack_snapshot(snapshot, output, valid_days=policy['zip_valid_days'], now=now, content=content)
@@ -175,6 +218,8 @@ def prepare_due(archive, sha256, work, *, mode, policy, task_config=None, state_
         else:
             result.update(files=selected['files'], sha256=sha256,
                           incomplete_history=selected['incomplete_history'])
-        result['reason'] = 'validated_candidate' if deploy else 'candidate_not_publishable' if any(
-            item['state'] == 'no_data' for item in report['resources'].values()) else 'no_content_change'
+        result['reason'] = ('validated_candidate' if deploy else 'candidate_not_publishable' if any(
+            item['state'] == 'no_data' for item in report['resources'].values()) else
+            'deployment_deferred' if changed or deployment_reason not in ('already_online', 'no_content_change')
+            else 'no_content_change')
         return result

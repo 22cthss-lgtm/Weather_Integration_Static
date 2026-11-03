@@ -10,7 +10,7 @@ from src.cloud_snapshots import CloudSnapshots
 
 def main(argv=None, *, env=None, client=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('resolve', 'verify-data', 'verify-state', 'cleanup', 'guard'))
+    parser.add_argument('command', choices=('resolve', 'deployment', 'verify-data', 'verify-state', 'cleanup', 'guard'))
     args = parser.parse_args(argv)
     env = os.environ if env is None else env
     try:

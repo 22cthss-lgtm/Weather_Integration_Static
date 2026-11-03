@@ -71,6 +71,71 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(result['artifact_id'], 1)
         self.assertEqual((self.root / 'pages-input/weather-snapshot.zip').read_bytes(), b'1')
         self.assertEqual(json.loads((self.root / 'source-state.json').read_text()), self.state())
+
+    def test_resolve_validates_bounded_candidates_and_uses_latest_saved_at(self):
+        old = self.state(now=NOW-timedelta(minutes=20))
+        latest = self.state(now=NOW-timedelta(minutes=1))
+        blobs = {2: json.dumps(old).encode(), 3: b'broken', 4: json.dumps(self.state('other')).encode(),
+                 5: json.dumps(latest).encode()}
+        self.client.states = [{'id': n, 'name': 'weather-scheduler-state', 'workflow_run': {'id': 10}}
+                              for n in range(2, 20)]
+        seen = []
+        def download(record):
+            seen.append(record['id'])
+            return blobs.get(record['id'], b'broken')
+        with patch.object(self.client, 'download_state', side_effect=download):
+            result = self.manager().resolve()
+        self.assertEqual(json.loads((self.root/'source-state.json').read_text()), latest)
+        self.assertEqual(len(seen), 12)
+        self.assertEqual(result['state_artifact_id'], 5)
+
+    def test_state_selection_uses_instant_not_id_upload_order_or_offset_text(self):
+        earlier = self.state(now=NOW-timedelta(minutes=2))
+        latest = self.state(now=NOW-timedelta(minutes=1))
+        latest['scheduler']['saved_at'] = (NOW-timedelta(minutes=1)).astimezone(timezone(timedelta(hours=-5))).isoformat()
+        self.client.states = [{'id': n, 'workflow_run': {'id': 10}} for n in (99, 2)]
+        with patch.object(self.client, 'download_state', side_effect=[json.dumps(earlier).encode(), json.dumps(latest).encode()]):
+            self.manager().resolve()
+        self.assertEqual(json.loads((self.root/'source-state.json').read_text()), latest)
+
+    def test_online_marker_requires_trusted_run_and_verified_content_order(self):
+        self.client.metadata['content_id']='a'*64
+        marker={'schema_version':1,'content_id':'a'*64,'code_sha':'b'*40,'run_id':'3','run_number':'3'}
+        run=dict(self.client.get_run(3),id=3,run_number=3,head_sha='b'*40)
+        with patch.object(self.client,'get_run',return_value=run):
+            result=self.manager(public_get=lambda url:marker).deployment()
+            self.assertEqual(result['state'],'verified')
+            self.assertEqual(result['content_created_at'],self.client.metadata['content_created_at'])
+            marker['run_number']='7'; run['run_number']=7
+            self.assertEqual(self.manager(public_get=lambda url:marker).deployment()['state'],'newer_run')
+            marker['run_number']='3'; run['run_number']=3
+            marker['content_id']='c'*64
+            self.assertEqual(self.manager(public_get=lambda url:marker).deployment()['state'],'version_unknown')
+            marker['code_sha']='d'*40
+            self.assertEqual(self.manager(public_get=lambda url:marker).deployment()['state'],'untrusted')
+        self.assertEqual(json.loads((self.root/'online-deployment.json').read_text())['state'],'untrusted')
+
+    def test_unknown_or_invalid_online_marker_never_becomes_verified(self):
+        for index,marker in enumerate((None,{},[],{'schema_version':True}, {'content_id':'secret'})):
+            with self.subTest(marker=marker):
+                self.env['RUNNER_TEMP']=str(self.root/f'case-{index}')
+                self.assertIn(self.manager(public_get=lambda url:marker).deployment()['state'],('unavailable','invalid'))
+        import requests
+        with patch.object(self.client,'get_run') as get:
+            def unavailable(url): raise requests.Timeout('PRIVATE')
+            self.assertEqual(self.manager(public_get=unavailable).deployment(),{'state':'unavailable'})
+            get.assert_not_called()
+
+    def test_state_write_failure_does_not_overwrite_prior_source_state(self):
+        self.install_state()
+        target=self.root/'source-state.json';target.write_bytes(b'prior-valid')
+        from src.cloud_snapshots import _write_json
+        def fail(path,document):
+            if Path(path)==target: raise PermissionError('write denied')
+            return _write_json(path,document)
+        with patch('src.cloud_snapshots._write_json',side_effect=fail):
+            with self.assertRaises(PermissionError): self.manager().resolve()
+        self.assertEqual(target.read_bytes(),b'prior-valid')
     def test_corrupt_expired_and_mismatched_state_reset(self):
         for state in [self.state('other'), self.state(now=NOW - timedelta(days=8)), dict(self.state(), secret='never persist')]:
             self.install_state(state)

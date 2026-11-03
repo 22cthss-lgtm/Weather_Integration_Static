@@ -50,6 +50,8 @@ class OceanService(BaseImageService):
                     response.raise_for_status()
                     if not response.headers.get("Content-Type", "").lower().startswith("image/"):
                         raise RuntimeError("JMA SST image URL did not return an image")
+                    if not next(response.iter_content(chunk_size=1), b''):
+                        raise RuntimeError("JMA SST image response was empty")
             except requests.RequestException as exc:
                 raise RuntimeError(f"JMA SST image request failed: {exc}") from exc
             return image_url, display_date

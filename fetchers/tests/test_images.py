@@ -23,11 +23,14 @@ class ProductTimeTests(unittest.TestCase):
     def test_kma_api_and_probe_describe_same_instant(self):
         service = KMAService()
         response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
         response.json.return_value = [{
             'tm': '2026102209',
             'url': '/w/repositary/image/cht/img/up85_2026102200.png',
         }]
-        with patch('src.services.kma_service.requests.get', return_value=response):
+        with patch('src.services.kma_service.requests.get', return_value=response), \
+             patch.object(service, 'image_exists', return_value=True):
             api_url, api_time = service.resolve_850hpa_image_url()
         from datetime import datetime, timezone
         with patch('src.services.kma_service.datetime') as clock:

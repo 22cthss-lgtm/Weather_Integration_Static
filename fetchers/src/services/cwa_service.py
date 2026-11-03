@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from ..http_client import http_get
+from ..http_client import HttpFailure, http_get
 from ..history_reconciliation import current_history_context
 import urllib3
 
@@ -48,6 +48,8 @@ class CWAService(BaseImageService):
     radar_image_pattern = "CV1_3600_{timestamp}.png"
     radar_data_regex = re.compile(r"""0:\{"img":'(?P<filename>CV1_3600_(?P<timestamp>\d{12})\.png)',\s*'text':'(?P<text>\d{4}/\d{2}/\d{2} \d{2}:\d{2})'\}""")
     radar_image_regex = re.compile(r"(?:https://www\.cwa\.gov\.tw)?(/Data/radar/CV1_3600_(\d{12})\.png)")
+    temperature_data_url = "https://www.cwa.gov.tw/Data/js/obs_img/Observe_temp.js"
+    rainfall_data_url = "https://www.cwa.gov.tw/Data/js/rainfall/RainfallImg_Day.js"
     temperature_source_url = "https://www.cwa.gov.tw/V8/C/W/OBS_Temp.html"
     temperature_image_prefix = "https://www.cwa.gov.tw/Data/temperature"
     temperature_image_pattern = "{timestamp}.GTP8w.jpg"
@@ -150,14 +152,18 @@ class CWAService(BaseImageService):
         image_prefix: str,
         image_pattern: str,
         publish_delay_minutes: int,
+        excluded_urls=(),
     ) -> tuple[str, str] | None:
         context = current_history_context()
         now = (context.now if context else datetime.now(self.satellite_timezone)).astimezone(self.satellite_timezone).replace(second=0, microsecond=0)
         delayed_now = now - timedelta(minutes=publish_delay_minutes)
-        rounded_now = delayed_now - timedelta(minutes=delayed_now.minute % 10)
+        step = self.rainfall_slot_minutes if image_pattern == self.rainfall_image_pattern else 10
+        rounded_now = delayed_now - timedelta(minutes=delayed_now.minute % step)
 
-        for offset in range(0, 360, 10):
+        for offset in range(0, 360, step):
             candidate_time = rounded_now - timedelta(minutes=offset)
+            if image_pattern == self.rainfall_image_pattern and candidate_time.hour == 0 and candidate_time.minute == 0:
+                continue  # Midnight is a completed daily product, not latest.
             timestamp = candidate_time.strftime("%Y%m%d%H%M")
             if image_pattern == self.satellite_image_pattern:
                 timestamp = candidate_time.strftime("%Y-%m-%d-%H-%M")
@@ -167,7 +173,7 @@ class CWAService(BaseImageService):
             filename = image_pattern.format(timestamp=timestamp)
             image_url = f"{image_prefix}/{filename}"
 
-            if self.image_exists(image_url):
+            if image_url not in excluded_urls and self.check_image_url(image_url):
                 display_time = candidate_time.strftime("%Y-%m-%d %H:%M")
                 return image_url, display_time
 
@@ -226,45 +232,82 @@ class CWAService(BaseImageService):
             candidate_time += timedelta(minutes=self.satellite_slot_minutes)
         return slots
         
-    def resolve_radar_image_url(self) -> tuple[str, str] | None:
-        try:
-            response = http_get(self.radar_data_url, timeout=10, verify=False)
-            response.raise_for_status()
-            match = self.radar_data_regex.search(response.text)
-            if match:
-                filename = match.group("filename")
-                display_time = match.group("text").replace("/", "-")
-                datetime.strptime(display_time, '%Y-%m-%d %H:%M')
-                image_url = f"{self.radar_image_prefix}/{filename}"
-                return image_url, display_time
-            _candidate_event('invalid', fatal=True)
-        except requests.RequestException as error:
-            _index_fault(error)
-        except (ValueError, TypeError):
-            _candidate_event('invalid', fatal=True)
+    def _read_index(self, url):
+        """A missing/changed metadata route may use another existing route.
 
+        The shared HTTP policy already exhausted retries before HttpFailure;
+        never bypass a blocked source with guesses for dozens of timestamps.
+        """
         try:
-            response = http_get(self.radar_source_url, timeout=10, verify=False)
-            response.raise_for_status()
-            match = self.radar_image_regex.search(response.text)
-            if match:
-                image_path = match.group(1)
-                timestamp = match.group(2)
-                image_url = f"{self.cwa_base_url}{image_path}"
-                candidate_time = datetime.strptime(timestamp, "%Y%m%d%H%M").replace(tzinfo=self.satellite_timezone)
-                display_time = candidate_time.strftime("%Y-%m-%d %H:%M")
-                return image_url, display_time
-            _candidate_event('invalid', fatal=True)
+            with http_get(url, timeout=10, headers=self.no_cache_headers(),
+                          params={"_": datetime.now(self.satellite_timezone).timestamp()},
+                          verify=False) as response:
+                response.raise_for_status()
+                return response.text
+        except HttpFailure:
+            _candidate_event('fault')
+            raise RuntimeError('candidate_source_error') from None
         except requests.RequestException as error:
-            _index_fault(error)
-        except (ValueError, TypeError):
-            _candidate_event('invalid', fatal=True)
+            response = getattr(error, 'response', None)
+            _candidate_event('missing' if response is not None and response.status_code in (404, 410) else 'fault')
+            return None
 
+    def _index_candidates(self, kind, text, *, script):
+        """Parse only this product/colour, then try newest verified image first."""
+        if text is None:
+            return []
+        if script and kind == 'temperature':
+            day = re.search(r"['\"]Day0['\"]\s*:\s*\{(.*?)(?=['\"]Day1['\"]|\Z)", text, re.S)
+            size = re.search(r"['\"]size1['\"]\s*:\s*\{(.*?)(?=['\"]size\d['\"]|\Z)", day[1], re.S) if day else None
+            text = size[1] if size else ''
+        elif script and kind == 'rainfall':
+            tab = re.search(r"['\"]Tab0['\"]\s*:\s*\{(.*?)(?=['\"]Tab1['\"]|\Z)", text, re.S)
+            day = re.search(r"['\"]Day0['\"]\s*:\s*\{(.*?)(?=['\"]Day1['\"]|\Z)", tab[1], re.S) if tab else None
+            text = day[1] if day else ''
+        if kind == 'radar':
+            pattern = r"(?:/Data/radar/)?CV1_3600_(?P<stamp>\d{12})\.png"
+            fmt = '%Y%m%d%H%M'
+        else:
+            suffix = 'GTP8w' if kind == 'temperature' else 'QZJ8'
+            pattern = r"(?P<stamp>\d{4}-\d{2}-\d{2}_\d{4})\." + suffix + r"(?:\.jpg)?"
+            fmt = '%Y-%m-%d_%H%M'
+        context = current_history_context()
+        now = context.now if context else datetime.now(self.satellite_timezone)
+        candidates = {}
+        for match in re.finditer(pattern, text):
+            try:
+                time = datetime.strptime(match['stamp'], fmt).replace(tzinfo=self.satellite_timezone)
+                grid = 30 if kind == 'rainfall' else 10
+                if time > now or time.minute % grid or (kind == 'rainfall' and time.hour == 0 and time.minute == 0):
+                    raise ValueError('Invalid product slot')
+                filename = getattr(self, f'{kind}_image_pattern').format(timestamp=match['stamp'])
+                candidates[time] = f"{getattr(self, f'{kind}_image_prefix')}/{filename}"
+            except ValueError:
+                _candidate_event('invalid')
+        if not candidates:
+            _candidate_event('invalid')
+        return [(url, time.strftime('%Y-%m-%d %H:%M'))
+                for time, url in sorted(candidates.items(), reverse=True)[:36]]
+
+    def _resolve_indexed_image(self, kind):
+        tried = set()
+        for url, script in ((getattr(self, f'{kind}_data_url'), True),
+                            (getattr(self, f'{kind}_source_url'), False)):
+            for image_url, display_time in self._index_candidates(kind, self._read_index(url), script=script):
+                if image_url in tried:
+                    continue
+                tried.add(image_url)
+                if self.check_image_url(image_url):
+                    return image_url, display_time
         return self.resolve_latest_image(
-            image_prefix=self.radar_image_prefix,
-            image_pattern=self.radar_image_pattern,
-            publish_delay_minutes=self.radar_publish_delay_minutes,
+            image_prefix=getattr(self, f'{kind}_image_prefix'),
+            image_pattern=getattr(self, f'{kind}_image_pattern'),
+            publish_delay_minutes=getattr(self, f'{kind}_publish_delay_minutes'),
+            excluded_urls=tried,
         )
+
+    def resolve_radar_image_url(self) -> tuple[str, str] | None:
+        return self._resolve_indexed_image('radar')
 
     def fetch_radar(self):
         resolved = self.resolve_radar_image_url()
@@ -313,34 +356,7 @@ class CWAService(BaseImageService):
         return slots
 
     def resolve_temperature_image_url(self) -> tuple[str, str] | None:
-        try:
-            response = http_get(
-                self.temperature_source_url,
-                timeout=10,
-                headers=self.no_cache_headers(),
-                params={"_": datetime.now(self.satellite_timezone).timestamp()},
-                verify=False,
-            )
-            response.raise_for_status()
-            match = self.temperature_image_regex.search(response.text)
-            if match:
-                image_url = f"{self.cwa_base_url}{match.group('path')}"
-                timestamp = datetime.strptime(match.group("timestamp"), "%Y-%m-%d_%H%M").replace(
-                    tzinfo=self.satellite_timezone
-                )
-                display_time = timestamp.strftime("%Y-%m-%d %H:%M")
-                return image_url, display_time
-            _candidate_event('invalid', fatal=True)
-        except requests.RequestException as error:
-            _index_fault(error)
-        except (ValueError, TypeError):
-            _candidate_event('invalid', fatal=True)
-
-        return self.resolve_latest_image(
-            image_prefix=self.temperature_image_prefix,
-            image_pattern=self.temperature_image_pattern,
-            publish_delay_minutes=self.temperature_publish_delay_minutes,
-        )
+        return self._resolve_indexed_image('temperature')
 
     def fetch_temperature(self):
         resolved = self.resolve_temperature_image_url()
@@ -359,34 +375,7 @@ class CWAService(BaseImageService):
         )
 
     def resolve_rainfall_image_url(self) -> tuple[str, str] | None:
-        try:
-            response = http_get(
-                self.rainfall_source_url,
-                timeout=10,
-                headers=self.no_cache_headers(),
-                params={"_": datetime.now(self.satellite_timezone).timestamp()},
-                verify=False,
-            )
-            response.raise_for_status()
-            match = self.rainfall_image_regex.search(response.text)
-            if match:
-                image_url = f"{self.cwa_base_url}{match.group('path')}"
-                timestamp = datetime.strptime(match.group("timestamp"), "%Y-%m-%d_%H%M").replace(
-                    tzinfo=self.satellite_timezone
-                )
-                display_time = timestamp.strftime("%Y-%m-%d %H:%M")
-                return image_url, display_time
-            _candidate_event('invalid', fatal=True)
-        except requests.RequestException as error:
-            _index_fault(error)
-        except (ValueError, TypeError):
-            _candidate_event('invalid', fatal=True)
-
-        return self.resolve_latest_image(
-            image_prefix=self.rainfall_image_prefix,
-            image_pattern=self.rainfall_image_pattern,
-            publish_delay_minutes=self.rainfall_publish_delay_minutes,
-        )
+        return self._resolve_indexed_image('rainfall')
 
     def build_rainfall_image_url(self, image_time: datetime) -> str:
         timestamp = image_time.astimezone(self.satellite_timezone).strftime("%Y-%m-%d_%H%M")
@@ -437,35 +426,27 @@ class CWAService(BaseImageService):
         cache_bust = str(int(datetime.now(self.satellite_timezone).timestamp()))
         image_url = f"{self.weather_chart_image_url}?t={cache_bust}"
 
-        if not self.image_exists(image_url):
+        if not self.check_image_url(image_url):
             return None
 
         return image_url, None
 
     def resolve_weather_chart_image_url(self) -> tuple[str, str | None] | None:
-        try:
-            response = http_get(
-                self.weather_chart_source_url,
-                timeout=10,
-                headers=self.no_cache_headers(),
-                params={"_": datetime.now(self.satellite_timezone).timestamp()},
-                verify=False,
-            )
-            response.raise_for_status()
-            match = self.weather_chart_image_regex.search(response.text)
-            if match:
+        text = self._read_index(self.weather_chart_source_url)
+        match = self.weather_chart_image_regex.search(text) if text is not None else None
+        if match:
+            try:
+                timestamp = datetime.strptime(match.group('timestamp').split('-')[0], '%Y%m%d%H').replace(
+                    tzinfo=self.satellite_timezone)
+            except ValueError:
+                _candidate_event('invalid')
+            else:
                 image_url = f"{self.cwa_base_url}{match.group('path')}"
-                timestamp = datetime.strptime(match.group("timestamp").split("-")[0], "%Y%m%d%H").replace(
-                    tzinfo=self.satellite_timezone
-                )
-                display_time = timestamp.strftime("%Y-%m-%d %H:00")
-                return image_url, display_time
-            _candidate_event('invalid', fatal=True)
-        except requests.RequestException as error:
-            _index_fault(error)
-        except (ValueError, TypeError):
-            _candidate_event('invalid', fatal=True)
-
+                if self.check_image_url(image_url):
+                    return image_url, timestamp.strftime('%Y-%m-%d %H:00')
+        elif text is not None:
+            _candidate_event('invalid')
+        # Direct FI04 has no trustworthy product timestamp; never invent one.
         return self.resolve_direct_weather_chart_image_url()
 
     def fetch_weather_chart(self):

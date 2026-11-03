@@ -5,6 +5,7 @@ Only cleanup deletes artifacts. No operation uploads, deploys, or fetches weathe
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from pathlib import Path
 import tempfile
 from urllib.parse import urlsplit
@@ -19,6 +20,7 @@ from .scheduling import default_tasks, restore_state
 
 WORKFLOW = '.github/workflows/pages-manual.yml'
 TTL_SECONDS = 604800
+STATE_CANDIDATE_LIMIT = 12
 
 
 def _read_json(path):
@@ -41,7 +43,8 @@ def public_marker(url):
     parsed = urlsplit(url)
     if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError('Invalid public site URL')
-    with requests.get(url, timeout=15, allow_redirects=False, stream=True) as response:
+    with requests.get(url, timeout=15, allow_redirects=False, stream=True,
+                      headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}) as response:
         if response.status_code != 200:
             raise ValueError('Deployment marker unavailable')
         body = bytearray()
@@ -76,13 +79,19 @@ class CloudSnapshots:
         self.root = Path(env['RUNNER_TEMP'])
         self.root.mkdir(parents=True, exist_ok=True)
         self.branch = env['DEFAULT_BRANCH']
+        self.verified_versions = {}
 
     def _validate_inner(self, blob, target=None):
         # GitHub's trusted outer digest has already authenticated these bytes.
         with tempfile.TemporaryDirectory(dir=self.root) as scratch:
             archive = Path(scratch) / 'input.zip'
             archive.write_bytes(blob)
-            return self.unpack(archive, hashlib.sha256(blob).hexdigest(), Path(scratch) / 'data', now=self.now)
+            metadata = self.unpack(archive, hashlib.sha256(blob).hexdigest(), Path(scratch) / 'data', now=self.now)
+            key, created = metadata['content_id'], metadata['content_created_at']
+            prior = self.verified_versions.get(key)
+            if prior is None or datetime.fromisoformat(created.replace('Z', '+00:00')) < datetime.fromisoformat(prior.replace('Z', '+00:00')):
+                self.verified_versions[key] = created
+            return metadata
 
     def _trusted(self, record, *, allow_current=False):
         run_id = record.get('workflow_run', {}).get('id')
@@ -121,20 +130,59 @@ class CloudSnapshots:
         result = {'sha256': hashlib.sha256(blob).hexdigest(), 'artifact_id': record['id'],
                   'snapshot_artifact_id': record['id'], 'content_id': metadata['content_id'],
                   'content_created_at': metadata['content_created_at']}
-        _write_json(self.root / 'source-result.json', result)
         restored = {}
+        compatible = []
         states = self.client.list_artifacts('weather-scheduler-state')
-        for state in states[:2]:
+        for state in states[:STATE_CANDIDATE_LIMIT]:
             try:
                 if self._trusted(state):
-                    restored = validate_state(self.client.download_state(state), result['content_id'], self.now)
-                    break
+                    document = validate_state(self.client.download_state(state), result['content_id'], self.now)
+                    saved = datetime.fromisoformat(document['scheduler']['saved_at'].replace('Z', '+00:00'))
+                    compatible.append((saved, int(state['id']), document))
             except ArtifactPermissionError:
                 raise
             except (ValueError, TypeError, KeyError, OSError):
                 continue
+        if compatible:
+            _, result['state_artifact_id'], restored = max(compatible, key=lambda item: item[:2])
+        _write_json(self.root / 'source-result.json', result)
         _write_json(self.root / 'source-state.json', restored)
         self._output(result)
+        return result
+
+    def deployment(self):
+        """Resolve online identity/order without assuming the newest saved data is live."""
+        result = {'state': 'unavailable'}
+        try:
+            marker = self.public_get(self.env['SITE_URL'].rstrip('/') + '/deployment.json')
+        except (ValueError, OSError, requests.RequestException):
+            marker = None
+        if marker is not None:
+            result = {'state': 'invalid'}
+            fields = {'schema_version', 'content_id', 'code_sha', 'run_id', 'run_number'}
+            def positive(value):
+                return type(value) in (str, int) and re.fullmatch(r'[1-9][0-9]*', str(value)) is not None
+            if (isinstance(marker, dict) and set(marker) == fields and type(marker['schema_version']) is int
+                    and marker['schema_version'] == 1
+                    and isinstance(marker['content_id'], str) and re.fullmatch('[0-9a-f]{64}', marker['content_id'])
+                    and isinstance(marker['code_sha'], str) and re.fullmatch('[0-9a-f]{40}', marker['code_sha'])
+                    and positive(marker['run_id']) and positive(marker['run_number'])):
+                run = self.client.get_run(int(marker['run_id']))
+                result = {'state': 'untrusted'}
+                if (trusted_run(run, WORKFLOW, self.branch) and str(run.get('id')) == str(marker['run_id'])
+                        and str(run.get('run_number')) == str(marker['run_number'])
+                        and run.get('head_sha') == marker['code_sha']):
+                    if int(marker['run_number']) >= int(self.env['GITHUB_RUN_NUMBER']):
+                        result = {'state': 'newer_run'}
+                    else:
+                        # Revalidate bounded artifact candidates here as well;
+                        # never trust unverified marker timestamps or artifact IDs.
+                        recover_snapshot(self.client, self._validate_inner, None,
+                                         workflow=WORKFLOW, default_branch=self.branch)
+                        created = self.verified_versions.get(marker['content_id'])
+                        result = ({'state': 'verified', 'marker': marker, 'content_created_at': created}
+                                  if created is not None else {'state': 'version_unknown'})
+        _write_json(self.root / 'online-deployment.json', result)
         return result
 
     def verify_data(self):

@@ -71,6 +71,9 @@ def prepare(archive, sha256, work, *, mode, days, products=None, update=None):
 
 def summary_markdown(result):
     lines = ['## Manual Pages data result', '', f"Decision: {result['reason']}", '']
+    if 'deployment_reason' in result:
+        lines += [f"Data changed: `{result['data_changed']}`",
+                  f"Deployment: `{result['deploy']}` / `{result['deployment_reason']}`", '']
     if result.get('snapshot_id'):
         lines += [f"Snapshot: `{result['snapshot_id']}`", f"SHA-256: `{result.get('sha256', '')}`",
                   f"Package expires: `{result.get('expires_at', '')}`", '']

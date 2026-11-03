@@ -89,6 +89,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: python -B fetchers/manage_snapshots.py guard
+      - name: Read Pages metadata
+        id: pages
+        uses: actions/configure-pages@v5
       - name: Automatically recover trusted data and scheduler state
         id: resolve
         if: inputs.snapshot_source == 'auto'
@@ -127,6 +130,13 @@ jobs:
           gh release download "$RELEASE_TAG" --repo "$GH_REPO" --pattern "$ASSET_NAME" --dir "$RUNNER_TEMP/pages-input"
           mv "$RUNNER_TEMP/pages-input/$ASSET_NAME" "$RUNNER_TEMP/pages-input/weather-snapshot.zip.tmp"
           mv "$RUNNER_TEMP/pages-input/weather-snapshot.zip.tmp" "$RUNNER_TEMP/pages-input/weather-snapshot.zip"
+      - name: Read trusted online deployment identity and version
+        if: inputs.mode == 'refresh'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: python -B fetchers/manage_snapshots.py deployment
       - name: Validate selected snapshot and optionally refresh sources
         id: snapshot
         env:
@@ -145,20 +155,16 @@ jobs:
             cp "$WORK/deployment.json" frontend/public/deployment.json
           fi
       - name: Python tests
-        if: steps.snapshot.outputs.deploy == 'true'
+        if: steps.snapshot.outputs.deploy == 'true' || steps.snapshot.outputs.save_snapshot == 'true'
         run: python -B -m unittest discover -s fetchers/tests -v
       - name: Frontend tests
-        if: steps.snapshot.outputs.deploy == 'true'
+        if: steps.snapshot.outputs.deploy == 'true' || steps.snapshot.outputs.save_snapshot == 'true'
         working-directory: frontend
         run: |
           npm ci
           npm test -- --run
-      - name: Read Pages metadata
-        if: steps.snapshot.outputs.deploy == 'true'
-        id: pages
-        uses: actions/configure-pages@v5
       - name: Build and verify static Pages routes
-        if: steps.snapshot.outputs.deploy == 'true'
+        if: steps.snapshot.outputs.deploy == 'true' || steps.snapshot.outputs.save_snapshot == 'true'
         env:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
         run: |

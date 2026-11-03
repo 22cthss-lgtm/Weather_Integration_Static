@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from ..http_client import http_get
+from ..http_client import HttpFailure, http_get
 
 from .base import BaseImageService
 
@@ -24,18 +24,19 @@ class KMAService(BaseImageService):
 
     def image_exists(self, image_url: str) -> bool:
         try:
-            response = http_get(
-                image_url,
-                timeout=10,
-                stream=True,
-                headers=self.no_cache_headers(),
-                params={"_": datetime.now(timezone.utc).timestamp()},
-            )
-            exists = response.ok and (response.headers.get("content-type") or "").startswith("image/")
-            response.close()
-            return exists
+            with http_get(image_url, timeout=10, stream=True,
+                          headers=self.no_cache_headers(),
+                          params={"_": datetime.now(timezone.utc).timestamp()}) as response:
+                if response.status_code in (404, 410):
+                    return False
+                response.raise_for_status()
+                if not (response.headers.get('Content-Type') or '').lower().startswith('image/'):
+                    raise RuntimeError('KMA candidate validation failed')
+                if not next(response.iter_content(chunk_size=1), b''):
+                    raise RuntimeError('KMA candidate validation failed')
+                return True
         except requests.RequestException:
-            return False
+            raise RuntimeError('KMA candidate source failed') from None
 
     def resolve_latest_850hpa_image_by_probe(self) -> tuple[str, str] | None:
         now_utc = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
@@ -53,32 +54,27 @@ class KMAService(BaseImageService):
         return None
 
     def resolve_850hpa_image_url(self) -> tuple[str, str] | None:
+        candidate = None
         try:
-            response = http_get(
-                self.analysis_image_api_url,
-                timeout=10,
-                headers=self.no_cache_headers(),
-                params={
-                    "type": "M",
-                    "data": "up85",
-                    "_": datetime.now(timezone.utc).timestamp(),
-                },
-            )
-            response.raise_for_status()
-            items = response.json()
-            if items:
-                latest_item = items[0]
-                image_path = latest_item.get("url", "")
-                image_tm = latest_item.get("tm", "")
-                if image_path and image_tm:
-                    image_url = image_path
-                    if image_url.startswith("/"):
-                        image_url = f"{self.weather_base_url}{image_url}"
-                    image_time = datetime.strptime(image_tm, "%Y%m%d%H").strftime("%Y-%m-%d %H:00")
-                    return image_url, image_time
-        except requests.RequestException:
+            with http_get(self.analysis_image_api_url, timeout=10,
+                          headers=self.no_cache_headers(),
+                          params={"type": "M", "data": "up85",
+                                  "_": datetime.now(timezone.utc).timestamp()}) as response:
+                response.raise_for_status()
+                items = response.json()
+                if isinstance(items, list) and items and isinstance(items[0], dict):
+                    image_path, image_tm = items[0].get('url'), items[0].get('tm')
+                    if isinstance(image_path, str) and image_path and isinstance(image_tm, str):
+                        image_time = datetime.strptime(image_tm, '%Y%m%d%H').strftime('%Y-%m-%d %H:00')
+                        image_url = f'{self.weather_base_url}{image_path}' if image_path.startswith('/') else image_path
+                        candidate = image_url, image_time
+        except HttpFailure:
+            # Common retries/source budget are exhausted; do not fan out probes.
+            raise RuntimeError('KMA index source failed') from None
+        except (requests.RequestException, ValueError, TypeError):
             pass
-
+        if candidate and self.image_exists(candidate[0]):
+            return candidate
         return self.resolve_latest_850hpa_image_by_probe()
 
     def fetch_850hpa(self):

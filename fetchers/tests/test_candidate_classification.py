@@ -71,8 +71,8 @@ class CandidateClassificationTests(unittest.TestCase):
                         with self.assertRaises(RuntimeError): CWAService().check_image_url('https://example.com/x')
                 self.assertEqual(ctx.outcomes['rainfall'][f'candidate_{category}_count'],1)
 
-    def test_index_timeout_and_malformed_index_stop_without_probe_fallback(self):
-        for resolver in ('resolve_radar_image_url','resolve_temperature_image_url','resolve_rainfall_image_url','resolve_weather_chart_image_url','resolve_tchp_image_url'):
+    def test_tchp_without_alternate_index_stops_on_timeout_or_malformed_data(self):
+        for resolver in ('resolve_tchp_image_url',):
             for reply, category in ((requests.Timeout('PRIVATE'),'fault'),(response(content_type='text/html'),'invalid')):
                 if not isinstance(reply,Exception): reply.text = 'unexpected index content'
                 with self.subTest(resolver=resolver,category=category),history_scope(POLICY,{},NOW) as ctx:
@@ -97,16 +97,18 @@ class CandidateClassificationTests(unittest.TestCase):
                 self.assertEqual(get.call_count,1)
                 reply.close.assert_called_once()
 
-    def test_malformed_index_timestamp_is_safely_classified(self):
+    def test_malformed_index_timestamp_is_classified_and_can_fall_back(self):
+        service = CWAService()
         reply = response(content_type='text/javascript')
-        reply.text = "0:{\"img\":'CV1_3600_202610291200.png', 'text':'2026/99/29 12:00'}"
-        with history_scope(POLICY,{},NOW) as ctx:
+        reply.text = "0:{\"img\":'CV1_3600_202699291200.png', 'text':'2026/99/29 12:00'}"
+        with history_scope(POLICY, {}, NOW) as ctx:
             ctx.active_kind = 'radar'
-            with patch('src.services.cwa_service.http_get',return_value=reply) as get:
-                with self.assertRaisesRegex(RuntimeError,'candidate_validation_error'):
-                    CWAService().resolve_radar_image_url()
-            self.assertEqual(get.call_count,1)
-            self.assertEqual(ctx.outcomes['radar']['candidate_invalid_count'],1)
+            with patch('src.services.cwa_service.http_get', return_value=reply) as get, \
+                 patch.object(service, 'resolve_latest_image', return_value=None) as probe:
+                self.assertIsNone(service.resolve_radar_image_url())
+            self.assertEqual(get.call_count, 2)
+            self.assertGreaterEqual(ctx.outcomes['radar']['candidate_invalid_count'], 1)
+            probe.assert_called_once()
 
 
 if __name__ == '__main__': unittest.main()
