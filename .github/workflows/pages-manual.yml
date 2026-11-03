@@ -1,6 +1,8 @@
-name: Publish validated snapshot to Pages (manual)
+name: Publish validated snapshot to Pages
 
 on:
+  schedule:
+    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       snapshot_source:
@@ -48,6 +50,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      SOURCE_MODE: ${{ github.event_name == 'schedule' && 'auto' || inputs.snapshot_source }}
+      MODE: ${{ github.event_name == 'schedule' && 'refresh' || inputs.mode }}
+      RETENTION_DAYS: ${{ github.event_name == 'schedule' && '7' || inputs.snapshot_retention_days }}
     permissions:
       contents: read
       pages: read
@@ -74,10 +80,7 @@ jobs:
       - name: Require default branch and validate exact input
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          SOURCE_MODE: ${{ inputs.snapshot_source }}
-          MODE: ${{ inputs.mode }}
           SOURCE_RUN: ${{ inputs.snapshot_run_id }}
-          RETENTION_DAYS: ${{ inputs.snapshot_retention_days }}
           RELEASE_TAG: ${{ inputs.snapshot_release }}
           ASSET_NAME: ${{ inputs.snapshot_asset }}
           ASSET_SHA: ${{ inputs.snapshot_sha256 }}
@@ -94,13 +97,13 @@ jobs:
         uses: actions/configure-pages@v5
       - name: Automatically recover trusted data and scheduler state
         id: resolve
-        if: inputs.snapshot_source == 'auto'
+        if: env.SOURCE_MODE == 'auto'
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: python -B fetchers/manage_snapshots.py resolve
       - name: Validate origin of explicitly selected prior run
-        if: inputs.snapshot_source == 'explicit' && inputs.snapshot_run_id != ''
+        if: env.SOURCE_MODE == 'explicit' && inputs.snapshot_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -111,7 +114,7 @@ jobs:
           gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > "$RUN_METADATA"
           python -B fetchers/refresh_pages.py source-run
       - name: Download snapshot from exact prior run
-        if: inputs.snapshot_source == 'explicit' && inputs.snapshot_run_id != ''
+        if: env.SOURCE_MODE == 'explicit' && inputs.snapshot_run_id != ''
         uses: actions/download-artifact@v5
         with:
           name: weather-snapshot
@@ -119,7 +122,7 @@ jobs:
           run-id: ${{ inputs.snapshot_run_id }}
           github-token: ${{ github.token }}
       - name: Download explicitly selected Release asset
-        if: inputs.snapshot_source == 'explicit' && inputs.snapshot_run_id == ''
+        if: env.SOURCE_MODE == 'explicit' && inputs.snapshot_run_id == ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -131,7 +134,7 @@ jobs:
           mv "$RUNNER_TEMP/pages-input/$ASSET_NAME" "$RUNNER_TEMP/pages-input/weather-snapshot.zip.tmp"
           mv "$RUNNER_TEMP/pages-input/weather-snapshot.zip.tmp" "$RUNNER_TEMP/pages-input/weather-snapshot.zip"
       - name: Read trusted online deployment identity and version
-        if: inputs.mode == 'refresh'
+        if: env.MODE == 'refresh'
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -141,9 +144,7 @@ jobs:
         id: snapshot
         env:
           ASSET_SHA: ${{ steps.resolve.outputs.sha256 || inputs.snapshot_sha256 }}
-          MODE: ${{ inputs.mode }}
-          RETENTION_DAYS: ${{ inputs.snapshot_retention_days }}
-          CWA_API_KEY: ${{ inputs.mode == 'refresh' && secrets.CWA_API_KEY || '' }}
+          CWA_API_KEY: ${{ env.MODE == 'refresh' && secrets.CWA_API_KEY || '' }}
           ARCHIVE: ${{ runner.temp }}/pages-input/weather-snapshot.zip
           WORK: ${{ runner.temp }}/pages-work
           RESULT: ${{ runner.temp }}/pages-input-result.json
@@ -190,7 +191,7 @@ jobs:
         with:
           name: weather-snapshot
           path: ${{ runner.temp }}/pages-work/output/weather-snapshot.zip
-          retention-days: ${{ inputs.snapshot_retention_days }}
+          retention-days: ${{ env.RETENTION_DAYS }}
           if-no-files-found: error
       - name: Download and verify newly saved data before deployment
         if: steps.snapshot.outputs.save_snapshot == 'true'
@@ -205,7 +206,7 @@ jobs:
         with:
           name: weather-scheduler-state
           path: ${{ runner.temp }}/pages-work/state/scheduler-state.json
-          retention-days: 7
+          retention-days: ${{ env.RETENTION_DAYS }}
           if-no-files-found: error
       - name: Download and verify saved scheduler state
         env:

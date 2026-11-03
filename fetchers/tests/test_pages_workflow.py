@@ -4,11 +4,12 @@ import yaml
 
 
 class PagesWorkflowTests(unittest.TestCase):
-    def test_manual_only_and_failure_gates(self):
+    def test_scheduled_and_manual_events_keep_failure_gates(self):
         path = Path(__file__).resolve().parents[2] / '.github/workflows/pages-manual.yml'
         text = path.read_text(encoding='utf-8')
         workflow = yaml.load(text, Loader=yaml.BaseLoader)
-        self.assertEqual(set(workflow['on']), {'workflow_dispatch'})
+        self.assertEqual(set(workflow['on']), {'workflow_dispatch', 'schedule'})
+        self.assertEqual(workflow['on']['schedule'], [{'cron': '*/10 * * * *'}])
         self.assertEqual(workflow['permissions'], {'contents': 'read'})
         self.assertEqual(workflow['concurrency']['cancel-in-progress'], 'false')
         build = workflow['jobs']['build']
@@ -34,7 +35,7 @@ class PagesWorkflowTests(unittest.TestCase):
         self.assertEqual(steps[upload_index]['with']['retention-days'], '1')
         self.assertEqual(steps[upload_index]['with']['path'], 'frontend/dist')
 
-    def test_refresh_is_manual_persisted_before_deploy_and_retention_is_explicit(self):
+    def test_refresh_is_persisted_before_deploy_and_retention_is_explicit(self):
         path = Path(__file__).resolve().parents[2] / '.github/workflows/pages-manual.yml'
         workflow = yaml.load(path.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         inputs = workflow['on']['workflow_dispatch']['inputs']
@@ -51,7 +52,7 @@ class PagesWorkflowTests(unittest.TestCase):
         self.assertLess(saved, website)
         self.assertEqual(steps[saved]['with']['if-no-files-found'], 'error')
         self.assertEqual(steps[saved]['with']['path'], '${{ runner.temp }}/pages-work/output/weather-snapshot.zip')
-        self.assertIn('inputs.snapshot_retention_days', steps[saved]['with']['retention-days'])
+        self.assertEqual(steps[saved]['with']['retention-days'], '${{ env.RETENTION_DAYS }}')
         download = next(step for step in steps if step.get('uses', '').startswith('actions/download-artifact@'))
         self.assertEqual(download['with']['run-id'], '${{ inputs.snapshot_run_id }}')
         self.assertEqual(download['with']['name'], 'weather-snapshot')

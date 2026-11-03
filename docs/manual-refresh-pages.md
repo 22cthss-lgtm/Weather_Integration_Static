@@ -1,10 +1,12 @@
 # 手動抓取最新資料，再發布 GitHub Pages
 
 > 本文記錄前版明確指定快照的流程。新版另加入 auto 選取與到期更新；
-> 現行政策與手動驗證方式請見 [按到期項目更新](due-refresh.md)。
+> 現行政策、手動驗證及每十分鐘自動排程請見 [按到期項目更新](due-refresh.md)。
 
-本功能延用 `.github/workflows/pages-manual.yml`。只有 Run workflow，沒有排程、push
-觸發、自動 commit JSON 或資料分支。本次只完成本機實作；尚未執行新版線上流程。
+本功能延用 `.github/workflows/pages-manual.yml`。本文保留前版 explicit 操作紀錄；目前
+另有每十分鐘 schedule，固定 auto＋refresh；手動 Run workflow 仍保留。沒有 push
+觸發、自動 commit JSON 或資料分支。目前 explicit 操作須先選 snapshot_source=explicit，
+資料與狀態期限依已確認政策固定七天；以下早期技術範圍描述不代表可自行調整政策。
 
 ## 操作與輸入
 

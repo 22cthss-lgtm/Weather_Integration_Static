@@ -1,9 +1,9 @@
 # 資料來源、更新流程與恢復保護
 
-- 盤點日期：2026-11-03（Asia/Taipei）。
-- 程式基準：`main`，commit `5914016a5e315c845dbbe4ba07985305d5ce51e3`。
+- 盤點日期：2026-11-04（Asia/Taipei）。
+- 程式基準：`main`，commit `94e92c4e494f2e712dbd7bee86b687190957110c`；包含本批新增 schedule 接線。
 - 依據：直接閱讀入口、Services、發布／快照、workflow 與前端程式；隔離真來源結果見第 8 節，先前手動雲端結果見本機 HANDOFF 第 14 節及本文第 11 節的界線摘要。
-- 本文件包含以基準 commit 為基底新增的 history v2 分類、相容驗證及前端提示修改（第 11 節）。來源 fallback 與 E/F 已在基準 commit；workflow 仍無 schedule。本批保留所有既有公開 JSON 修改，沒有真實抓取或部署；不能把隔離測試當作線上驗收。
+- history v2 分類與相容驗證已隨基準 commit 完成手動 Run12／13 驗收；當時紀錄見第 11 節。來源 fallback 與 E/F 維持不變。本批僅新增每十分鐘 schedule 與事件設定接線（第 12 節），保留既有公開 JSON 修改；真 schedule 驗收結果見本機 HANDOFF，不把模擬或手動事件當成排程成功。
 - **維護要求：之後修改資料流、Fetcher、恢復／發布或前端讀取行為時，應同步更新本文件、盤點日期與程式基準。**
 
 HANDOFF.md 與本機 .runtime 驗收證據不納入版本控制；相關連結供本機維護使用。
@@ -31,7 +31,7 @@ flowchart TD
     PG[GitHub Pages：前端／JSON／deployment.json]
     BR[瀏覽器讀取靜態 JSON]
     IMG[瀏覽器直接向官方載入圖片]
-    Q[提案：定時 schedule，尚未接入]
+    Q[GitHub schedule：每10分鐘 auto＋refresh]
 
     S --> L
     L --> P
@@ -53,7 +53,7 @@ flowchart TD
     PA --> PG
     PG --> BR
     BR --> IMG
-    Q -.-> J
+    Q --> A
 ```
 
 關鍵區別：
@@ -102,9 +102,9 @@ flowchart TD
 | 手動 auto＋refresh | auto 恢復可信 artifact，refresh 選到期任務與已知 history 缺口 | 隔離候選；有效新內容才存新資料 ZIP，部署另看線上版本；無變更亦可補部署（第九節） | 獨立保存成功檢查、退避及歷史缺口；入口目前要求 CWA key |
 | 手動 auto＋publish | 恢復所選資料，不執行氣象 Service | 建置／部署原有效資料；不建立新資料版本或延長輸入 ZIP 期限 | 仍處理並保存 scheduler state |
 | 手動 explicit | 與 refresh／publish 正交；指定 Run 或 Release ZIP 及 SHA | 使用相同 prepare_due 後續流程 | 不自動恢復舊 scheduler artifact，通常重新初始化到期狀態；auto 不搜尋 Release |
-| 定時 schedule | **尚未接入 workflow** | 沒有定時抓取或部署 | 每十分鐘喚醒及無 inputs 時的 auto／refresh 預設值仍是提案 |
+| 定時 schedule | 每十分鐘喚醒，明確 auto＋refresh；仍只執行 due／history_due | 與手動 auto＋refresh 相同，依內容與線上 marker 判斷發布／略過 | 資料／state 七天，共用手動 concurrency 與所有恢復／部署保護 |
 
-到期與 fixed-time primitives 已在 [scheduling.py](../fetchers/src/scheduling.py) 實作，但目前十三項均為 interval，設定見 [due-intervals.json](../fetchers/policies/due-intervals.json)。只有工作被啟動後才判斷到期，不會自行喚醒。工作流程目前僅 workflow_dispatch，沒有 push 觸發。
+到期與 fixed-time primitives 已在 [scheduling.py](../fetchers/src/scheduling.py) 實作，但目前十三項均為 interval，設定見 [due-intervals.json](../fetchers/policies/due-intervals.json)。只有工作被啟動後才判斷到期，不會自行喚醒。工作流程由 workflow_dispatch 與 schedule 喚醒，沒有 push 觸發。
 
 本機另有 [update_snapshot.py](../fetchers/update_snapshot.py) 一次性隔離快照入口，預設寫 `.runtime/snapshots`，不修改 public；它不是 watcher 的後續階段，也不是雲端 prepare_due。
 
@@ -162,7 +162,7 @@ flowchart TD
 | 已知限制 | 子資源診斷 | history／daily 失敗可能不使本機整產品報錯；成功檢查與部分資源失敗應分開看。 |
 | 提案，待確認 | 首次歷史建檔與補查 | 目前仍共用每輪十二次限制；拆分初查／重試預算未實作，新數值未定。本批只有分類與提示，沒有調整策略。 |
 | 待檢視 | 雷達／衛星保守延遲 | 現行 fallback／探查使用 20／30 分鐘延遲，是程式策略，不是已驗證的官方發布週期。 |
-| 提案，未啟用 | 定時抓取／部署 | workflow 尚無 schedule；事件預設值、手動／排程混合驗收及正式啟用仍待確認。 |
+| 本批新增 | 定時抓取／部署 | workflow 已接每十分鐘 schedule；預設分支推送後啟用，兩次真 schedule 驗收及自然未變／失敗情境分開記錄於本機 HANDOFF。 |
 | 未定案 | 長期保存／歷史清理 | 七天只是測試設定；未實作新的長期政策，不得擅自刪除歷史或續期舊包。 |
 
 ## 7. fallback 失敗路徑盤點（2026-11-02 當時紀錄，已納入 5914016）
@@ -288,3 +288,11 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 實際瀏覽器驗證尚未完成：IAB 連 localhost 逾時，Windows Computer Use 因無法可靠辨認目前瀏覽器網址停止，雙方未繼續 UI 操作。上線後仍需逐頁核對文字與選圖、逐檔 SHA／marker、artifact 恢復及正常 refresh。原 Run9～11 已驗證正常發布、一次拒絕部署時舊站保留、下輪恢復失敗 Run 的可信包／state；但自然歷史變更，**無內容變化沿用原 ZIP 補部署／同版本跳過部署仍僅模擬**，不能冒稱已通過線上驗收。
 
 本批沒有調整每輪十二次、補查頻率／上限、發布延遲、來源預算或歷史保存策略，沒有真實抓取、修改 public JSON、commit、push、部署或啟用排程。首次建檔／補查策略最佳化仍只是提案；自動排程仍須後續另行確認與驗收。
+
+## 12. 每十分鐘自動入口（2026-11-04）
+
+使用者已授權啟用排程。[workflow](../.github/workflows/pages-manual.yml) 保留原路徑、手動輸入與所有 job，新增 UTC `*/10 * * * *`。build.env 只在 `github.event_name == 'schedule'` 時固定 SOURCE_MODE=auto、MODE=refresh、RETENTION_DAYS=7；手動事件仍使用原 inputs，不用真假值 fallback 吞掉非法輸入。resolve／explicit 分支、deployment marker、CWA key 注入、prepare 與兩種保存期限共用這三個值，沒有改 due 引擎或政策。
+
+資料／state 恢復、密鑰缺失停止、內容去重、快照原期限、同組互斥、舊 run guard、保存後讀回、Pages 部署與清理保護均沿用既有流程；不新增資料分支或自動 commit JSON。事件與輸入矩陣見 [test_schedule_events.py](../fetchers/tests/test_schedule_events.py)，正式 workflow 保護見 [test_pages_workflow.py](../fetchers/tests/test_pages_workflow.py)。沒有改畫面，先前窄版限制未修。
+
+具體政策與操作見 [due-refresh](due-refresh.md)。真實 schedule 的 event、恢復來源、資料與 state artifact、線上 marker／SHA 及未自然發生情境記在本機 HANDOFF；沒有觀察到的分支仍待驗證。第 7～11 節保留各批當時紀錄，不能將其「當時未啟用」誤讀為本批仍無 schedule。

@@ -1,7 +1,25 @@
 # 按到期項目更新：設計、操作與驗收
 
-本批只準備本機程式與測試。現有 workflow 仍只有 workflow_dispatch，沒有 schedule、
-push 觸發、自動 commit JSON 或資料分支。GitHub 操作須另經使用者確認。
+現行 `.github/workflows/pages-manual.yml` 保留 workflow_dispatch，並依使用者授權加入
+每十分鐘 `schedule`（`*/10 * * * *`，UTC）。沒有 push 觸發、自動 commit JSON 或資料分支。
+以下設定自排程批提交到預設分支後生效；真實事件驗收結果記在本機 HANDOFF。
+
+## 排程與手動入口
+
+schedule 沒有手動輸入，build job 明確使用 `auto`＋`refresh`＋七天保存；所有恢復、
+部署標記讀取、密鑰注入、prepare 與 artifact 保存步驟共用同一組設定。手動入口仍保留
+auto／explicit 與 publish／refresh；手動預設 mode 仍是 publish，非法／空輸入仍會停止，
+不靠空值預設偷偷切換模式。CWA key 只送入 refresh 的 prepare 步驟。
+
+每十分鐘只喚醒一次到期檢查，不會每輪重抓十三項；各產品間隔、history 十二次上限、
+重試與來源預算均維持下表政策。排程和手動共用 `pages-manual` concurrency group，
+`cancel-in-progress: false`；舊版本 guard、快照／狀態驗證、失敗保留與部署保護均延用。
+內容已在線上且未變時只保存 state、不重包／部署；已存未上線的有效版本仍按原 marker
+恢復規則判斷補部署。GitHub schedule 可能延遲，不保證精準每600秒執行。
+
+驗收必須核真 run 的 `event=schedule`，不能以 workflow_dispatch 替代；至少觀察兩輪，
+核恢復選取、due／history_due、資料／state 讀回、marker 及發布時逐檔 JSON SHA。
+沒有自然發生的未變／故障情境標為待驗證，不改來源或資料來製造條件。
 
 ## 已確認政策
 
