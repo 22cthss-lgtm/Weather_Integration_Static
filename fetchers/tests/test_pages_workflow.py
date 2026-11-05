@@ -9,7 +9,9 @@ class PagesWorkflowTests(unittest.TestCase):
         text = path.read_text(encoding='utf-8')
         workflow = yaml.load(text, Loader=yaml.BaseLoader)
         self.assertEqual(set(workflow['on']), {'workflow_dispatch', 'schedule'})
-        self.assertEqual(workflow['on']['schedule'], [{'cron': '*/10 * * * *'}])
+        # Pin ten-minute cadence while allowing a cron-only phase adjustment.
+        self.assertEqual(len(workflow['on']['schedule']), 1)
+        self.assertRegex(workflow['on']['schedule'][0]['cron'], r'^(?:\*|[0-9]-59)/10 \* \* \* \*$')
         self.assertEqual(workflow['permissions'], {'contents': 'read'})
         self.assertEqual(workflow['concurrency']['cancel-in-progress'], 'false')
         build = workflow['jobs']['build']
