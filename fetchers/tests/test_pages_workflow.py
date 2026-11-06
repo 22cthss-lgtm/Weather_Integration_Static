@@ -8,13 +8,19 @@ class PagesWorkflowTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[2] / '.github/workflows/pages-manual.yml'
         text = path.read_text(encoding='utf-8')
         workflow = yaml.load(text, Loader=yaml.BaseLoader)
-        self.assertEqual(set(workflow['on']), {'workflow_dispatch', 'schedule'})
+        self.assertEqual(set(workflow['on']), {'workflow_dispatch'})
         # Pin ten-minute cadence while allowing a cron-only phase adjustment.
-        self.assertEqual(len(workflow['on']['schedule']), 1)
-        self.assertRegex(workflow['on']['schedule'][0]['cron'], r'^(?:\*|[0-9]-59)/10 \* \* \* \*$')
+        relay = yaml.load(path.with_name('weather-relay.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(relay['on']['schedule'], [{'cron': '3-59/10 * * * *'}])
+        self.assertNotEqual(relay['concurrency']['group'], workflow['concurrency']['group'])
+        self.assertEqual(relay['concurrency']['cancel-in-progress'], 'false')
+        self.assertEqual(relay['jobs']['relay']['permissions'], {'contents': 'read', 'actions': 'write'})
         self.assertEqual(workflow['permissions'], {'contents': 'read'})
         self.assertEqual(workflow['concurrency']['cancel-in-progress'], 'false')
         build = workflow['jobs']['build']
+        self.assertEqual(build['needs'], 'admission')
+        self.assertIn("needs.admission.outputs.allowed == 'true'", build['if'])
+        self.assertEqual(workflow['jobs']['admission']['permissions']['actions'], 'read')
         deploy = workflow['jobs']['deploy']
         self.assertEqual(deploy['needs'], 'build')
         self.assertIn("needs.build.outputs.deploy == 'true'", deploy['if'])

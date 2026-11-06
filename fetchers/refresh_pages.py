@@ -31,6 +31,8 @@ def main(argv=None):
         else:
             update = None
             if os.environ['MODE'] == 'refresh':
+                from chain_controller import require_enabled
+                require_enabled()
                 if not os.environ.get('CWA_API_KEY', '').strip():
                     raise ValueError('CWA_API_KEY is required for refreshing all website resources')
                 from update_images import registered_products, update_image

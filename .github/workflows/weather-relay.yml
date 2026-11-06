@@ -1,0 +1,42 @@
+name: Weather automatic relay
+run-name: ${{ inputs.relay_request_id && format('Relay {0}', inputs.relay_request_id) || format('Relay seed {0}', github.run_id) }}
+
+on:
+  schedule:
+    - cron: '3-59/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      relay_request_id:
+        description: 'Parent relay identity; leave empty to seed the single relay'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# This lock never holds the publisher lock. Single pending merges contenders.
+concurrency:
+  group: weather-relay
+  cancel-in-progress: false
+
+jobs:
+  relay:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Admit, wait with live stop checks, and hand off once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELAY_REQUEST_ID: ${{ inputs.relay_request_id }}
+        run: python -B fetchers/chain_controller.py relay

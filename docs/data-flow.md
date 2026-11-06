@@ -1,9 +1,9 @@
 # 資料來源、更新流程與恢復保護
 
-- 盤點日期：2026-11-04（Asia/Taipei）。
-- 程式基準：`main`，commit `94e92c4e494f2e712dbd7bee86b687190957110c`；包含本批新增 schedule 接線。
+- 盤點日期：2026-11-06（Asia/Taipei）。
+- 程式基準：`main`，commit `903c7caeaf1f49931ebe0463ae85e2a8887a69cb`，加上本批獨立接力控制器；此 SHA 是實作前基準。第 13 節描述程式行為，線上啟用與驗收結果另記本機 HANDOFF。
 - 依據：直接閱讀入口、Services、發布／快照、workflow 與前端程式；隔離真來源結果見第 8 節，先前手動雲端結果見本機 HANDOFF 第 14 節及本文第 11 節的界線摘要。
-- history v2 分類與相容驗證已隨基準 commit 完成手動 Run12／13 驗收；當時紀錄見第 11 節。來源 fallback 與 E/F 維持不變。本批僅新增每十分鐘 schedule 與事件設定接線（第 12 節），保留既有公開 JSON 修改；真 schedule 驗收結果見本機 HANDOFF，不把模擬或手動事件當成排程成功。
+- history v2 與先前來源／恢復修正維持不變。本批只實作接力入口、停止與去重保護，沒有改各圖資到期、歷史或保存政策。第 12 節保留先前 cron 直接入口紀錄；接力線上驗收須有真實 run 證據，不把模擬事件當作接力成功。
 - **維護要求：之後修改資料流、Fetcher、恢復／發布或前端讀取行為時，應同步更新本文件、盤點日期與程式基準。**
 
 HANDOFF.md 與本機 .runtime 驗收證據不納入版本控制；相關連結供本機維護使用。
@@ -31,7 +31,9 @@ flowchart TD
     PG[GitHub Pages：前端／JSON／deployment.json]
     BR[瀏覽器讀取靜態 JSON]
     IMG[瀏覽器直接向官方載入圖片]
-    Q[GitHub schedule：每10分鐘 auto＋refresh]
+    Q[控制器 cron 備援／手動 seed／上一輪 dispatch]
+    RC[獨立 relay 鎖：即時開關／busy／識別查證]
+    RW[有界等待約10分鐘，再查開關]
 
     S --> L
     L --> P
@@ -53,7 +55,10 @@ flowchart TD
     PA --> PG
     PG --> BR
     BR --> IMG
-    Q --> A
+    Q --> RC
+    RC -->|閒置時 dispatch auto＋refresh＋7天| J
+    RC --> RW
+    RW -->|仍啟用：dispatch 下一控制器| Q
 ```
 
 關鍵區別：
@@ -102,9 +107,9 @@ flowchart TD
 | 手動 auto＋refresh | auto 恢復可信 artifact，refresh 選到期任務與已知 history 缺口 | 隔離候選；有效新內容才存新資料 ZIP，部署另看線上版本；無變更亦可補部署（第九節） | 獨立保存成功檢查、退避及歷史缺口；入口目前要求 CWA key |
 | 手動 auto＋publish | 恢復所選資料，不執行氣象 Service | 建置／部署原有效資料；不建立新資料版本或延長輸入 ZIP 期限 | 仍處理並保存 scheduler state |
 | 手動 explicit | 與 refresh／publish 正交；指定 Run 或 Release ZIP 及 SHA | 使用相同 prepare_due 後續流程 | 不自動恢復舊 scheduler artifact，通常重新初始化到期狀態；auto 不搜尋 Release |
-| 定時 schedule | 每十分鐘喚醒，明確 auto＋refresh；仍只執行 due／history_due | 與手動 auto＋refresh 相同，依內容與線上 marker 判斷發布／略過 | 資料／state 七天，共用手動 concurrency 與所有恢復／部署保護 |
+| 自動控制器（cron／接力） | 控制器約每十分鐘檢查，閒置時 dispatch 明確 auto＋refresh；仍只執行 due／history_due | 發布子 run 與手動 auto＋refresh 相同；busy 不追加工作 | 資料／state 七天；控制器獨立鎖，發布子 run 共用原手動鎖與保護；見第 13 節 |
 
-到期與 fixed-time primitives 已在 [scheduling.py](../fetchers/src/scheduling.py) 實作，但目前十三項均為 interval，設定見 [due-intervals.json](../fetchers/policies/due-intervals.json)。只有工作被啟動後才判斷到期，不會自行喚醒。工作流程由 workflow_dispatch 與 schedule 喚醒，沒有 push 觸發。
+到期與 fixed-time primitives 已在 [scheduling.py](../fetchers/src/scheduling.py) 實作，但目前十三項均為 interval，設定見 [due-intervals.json](../fetchers/policies/due-intervals.json)。只有工作被啟動後才判斷到期，不會自行喚醒。控制器接受 schedule／workflow_dispatch，再以 workflow_dispatch 呼叫發布入口；沒有 push 觸發。先前直接 cron 的紀錄見第 12 節；線上即時狀態及驗收證據見本機 HANDOFF。
 
 本機另有 [update_snapshot.py](../fetchers/update_snapshot.py) 一次性隔離快照入口，預設寫 `.runtime/snapshots`，不修改 public；它不是 watcher 的後續階段，也不是雲端 prepare_due。
 
@@ -289,10 +294,53 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 
 本批沒有調整每輪十二次、補查頻率／上限、發布延遲、來源預算或歷史保存策略，沒有真實抓取、修改 public JSON、commit、push、部署或啟用排程。首次建檔／補查策略最佳化仍只是提案；自動排程仍須後續另行確認與驗收。
 
-## 12. 每十分鐘自動入口（2026-11-04）
+## 12. cron 直接入口的歷史紀錄（2026-11-04）
+
+此節是先前實作紀錄；cron 相位已在 `903c7ca` 改成 `3-59/10 * * * *`。替代入口見第 13 節。
 
 使用者已授權啟用排程。[workflow](../.github/workflows/pages-manual.yml) 保留原路徑、手動輸入與所有 job，新增 UTC `*/10 * * * *`。build.env 只在 `github.event_name == 'schedule'` 時固定 SOURCE_MODE=auto、MODE=refresh、RETENTION_DAYS=7；手動事件仍使用原 inputs，不用真假值 fallback 吞掉非法輸入。resolve／explicit 分支、deployment marker、CWA key 注入、prepare 與兩種保存期限共用這三個值，沒有改 due 引擎或政策。
 
 資料／state 恢復、密鑰缺失停止、內容去重、快照原期限、同組互斥、舊 run guard、保存後讀回、Pages 部署與清理保護均沿用既有流程；不新增資料分支或自動 commit JSON。事件與輸入矩陣見 [test_schedule_events.py](../fetchers/tests/test_schedule_events.py)，正式 workflow 保護見 [test_pages_workflow.py](../fetchers/tests/test_pages_workflow.py)。沒有改畫面，先前窄版限制未修。
 
 具體政策與操作見 [due-refresh](due-refresh.md)。真實 schedule 的 event、恢復來源、資料與 state artifact、線上 marker／SHA 及未自然發生情境記在本機 HANDOFF；沒有觀察到的分支仍待驗證。第 7～11 節保留各批當時紀錄，不能將其「當時未啟用」誤讀為本批仍無 schedule。
+
+
+## 13. 獨立接力控制器（2026-11-06 實作）
+
+### 入口與鎖
+
+[weather-relay.yml](../.github/workflows/weather-relay.yml) 是唯一 cron 所在檔案，保留原相位 `3-59/10 * * * *` 作中斷備援，另接受手動 seed 與上一輪 `workflow_dispatch`。固定 `weather-relay` 全流程鎖、`cancel-in-progress: false`、預設 single pending，使同時到達的 seed／cron／handoff 合併為最多一個執行中與一個 pending 控制器。pending 可被取代，不能當作每個事件都會執行的佇列。
+
+[pages-manual.yml](../.github/workflows/pages-manual.yml) 的原手動輸入／publish 預設及整批 `pages-manual` 鎖保留；移除直接 cron。控制器不持有發布鎖、不等待子發布完成；入口與派發前查 queued／in_progress／waiting／pending／requested，有工作時記錄 busy，不追加自動發布，但仍等待並接下一控制器。陳舊未完成 run 也不能因年齡被忽略。
+
+發布流程仍是原可信 artifact 生產者，沒有把 artifact 搬到控制器；[cloud_snapshots.py](../fetchers/src/cloud_snapshots.py)／[artifact_store.py](../fetchers/src/artifact_store.py) 的 workflow 路徑、版本 guard、內容去重、保存讀回、線上 marker、失敗備援與清理規則均未更動。手動發布也不啟動接力。資料及 scheduler state 的保存與有效期限仍是 7 天；控制器不保存資料 artifact、不改 JSON、不建資料分支。
+
+### 識別碼、去重及回應遺失
+
+控制邏輯在 [chain_controller.py](../fetchers/chain_controller.py)。控制器以自身 run ID／attempt 組成 `u<ID>a<attempt>` 呼叫發布，明確帶入 auto＋refresh＋7天；發布的 `run-name` 固定為 `Pages chain <識別碼>`。交棒使用 `r<ID>a<attempt>`，下一控制器名稱為 `Relay <識別碼>`，入口也核對其 parent run ID／attempt／branch／event 及自己的 title，不只印出未查證的父識別字串。Summary 記錄父識別碼、本輪 ID／attempt、更新子 run、busy／停止原因、下一 relay ID 及當時狀態。下一輪尚未結束時只報 queued／觀察中，不宣稱成功。
+
+去重紀錄是 GitHub Actions 的 run metadata（`display_title`、ID、attempt、event、branch、workflow path、created_at），不是公開 JSON，也不是 7 天 scheduler-state artifact。其保留期限取決於 repository Actions 執行紀錄政策，不在本批改動。不得任意刪除仍用於接力查證的執行紀錄。
+
+每個邏輯派發最多一次 POST。派發前先找同識別碼；找到一份就沿用，找到多份則停止。HTTP 逾時、5xx、回應截斷或其他結果不明時，只做最多三輪完整查證（輪間 2／4 秒），不重新 POST。確認不到就報 `dispatch_unconfirmed_no_resend`，交由未來 cron 重新 seed，不能當作派發成功。即使 POST 回成功，也須查到匹配 run 才記錄成功派發。
+
+發布 admission 在原整批鎖內執行：核對 parent workflow／ID／attempt／branch、目前 run 是否出現在完整查詢，已有更早同識別碼 run 則略過 build。自動請求不允許 rerun 重做抓取，需由新控制器產生新識別碼。普通手動輸入不需控制器或 token 即可通過 admission，原發布校驗照常執行。
+
+每次列表查詢最多讀 100 份符合條件的 run，total_count 必須等於實際筆數，拒絕超限、重複 ID、錯誤型別與不一致身分；不截斷後猜測。父 run 遺失則停止。GitHub 刪除的舊執行不會留在清單，不能證明曾經不存在：因此不支援刪紀錄後重播舊識別碼，也沒有另建長期去重帳本。單次 POST 規則避免本控制器因回應遺失而主動產生第二份派發。
+
+### 停止與有界失敗
+
+停止開關是 Actions UI 的 **Weather automatic relay → Disable workflow**。入口、等待的每個至多 20 秒分段前後、派發前都用 API 重讀 controller `state`，非 active 或無法確認就停止；不能用起跑時的 vars 快照代替。停用也停止此 workflow 的 cron 備援。已建立的 run 不會因停用自動取消，因此 queued 自動發布 admission 與 [refresh_pages.py](../fetchers/refresh_pages.py) 真正進入 prepare_due 前再重查；手動發布不受此開關限制。已進入來源更新的本輪允許完成，不逐項中斷正在執行的來源。
+
+恢復時先確認舊控制器已結束（必要時在停用期間取消等待中的控制器），再 Enable workflow，等 cron 或明確手動 seed。快速關開若發生在兩次狀態讀取之間，舊 run 可能看不到中間的停用；本機測試不能替代此操作驗收。
+
+GET 最多三次、每次 timeout 10 秒、退避 1／3 秒；401／403／壞文件不重試。回應上限 2 MiB，拒絕 redirect，token 只送固定 api.github.com repository 路徑。POST 不重試；查證失敗不派發。等待以 monotonic clock 計算至控制器開始後 600 秒，最近自動派發不足 600 秒時先等待剩餘時間並重查 busy，不追趕漏掉的整排時次。整個 relay job 上限 18 分鐘，admission job 上限 3 分鐘。
+
+更新／測試／部署失敗不使控制器立即重抓；控制器正常到下一時段再判斷。取消控制器不在 finally 續接，cron 或已存在 seed 仍可能恢復接力；需要持續停止時應停用 workflow。控制 API／完整性錯誤則安全停止接力，保留既有線上版本與有效 artifact，由 cron 備援接回。
+
+### 權限、限制與待驗證
+
+控制器只給 contents:read（checkout）與 actions:write（查詢／dispatch），沒有 contents:write、Pages、OIDC、來源密鑰或 PAT。發布 admission／pre-fetch 檢查使用原 actions:read；其餘 job 權限不擴張。
+
+等待仍占用 runner，連續運作約額外 1,440 runner 分鐘／日及約一個併發名額，另加發布成本。控制器本身不被部署等待鎖住，但發布流程仍依既有整批鎖串行，忙碌可能使實際抓取間隔超過 10 分鐘；不承諾準點。busy 查詢與 POST 沒有原子交易，極短競爭仍可能形成一個 pending；原互斥與 admission 保護保留，不能宣稱完全不會與手動派發競爭。
+
+本節描述已實作行為與阻網測試；真 dispatch、開關操作、兩輪接力及線上逐檔 SHA 的結果，須以本機 HANDOFF 中有 run ID 的驗收紀錄為準。將新 workflow 推送至預設分支就可能啟動 cron，不能把推送當作與啟用無關的純文件動作；須先確認線上授權。後續線上驗收須分別記錄真正 cron／relay dispatch 的父子關係、開關等待中停止、busy 不追加、到期略過、state 累進、內容未變／新內容發布與資料對照。未自然發生的失敗或未變內容仍列待驗證。

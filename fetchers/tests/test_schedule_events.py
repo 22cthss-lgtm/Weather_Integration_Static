@@ -27,9 +27,9 @@ class ScheduleEventTests(unittest.TestCase):
         env = {}
         for key in ('SOURCE_MODE', 'MODE', 'RETENTION_DAYS'):
             expression = self.build.get('env', {}).get(key, '')
-            match = re.fullmatch(r"\$\{\{ github.event_name == 'schedule' && '([^']+)' \|\| inputs\.([a-z_]+) \}\}", expression)
-            self.assertIsNotNone(match, f'{key} must explicitly distinguish schedule from manual inputs')
-            env[key] = match[1] if event == 'schedule' else str(inputs.get(match[2], ''))
+            match = re.fullmatch(r"\$\{\{ inputs\.([a-z_]+) \}\}", expression)
+            self.assertIsNotNone(match, f'{key} must use dispatched inputs')
+            env[key] = str(inputs.get(match[1], ''))
         for key, name in {'SOURCE_RUN':'snapshot_run_id', 'RELEASE_TAG':'snapshot_release',
                           'ASSET_NAME':'snapshot_asset', 'ASSET_SHA':'snapshot_sha256'}.items():
             env[key] = str(inputs.get(name, ''))
@@ -40,7 +40,17 @@ class ScheduleEventTests(unittest.TestCase):
             return refresh_pages.main(['inputs'])
 
     def test_schedule_has_explicit_auto_refresh_seven_day_inputs(self):
-        env = self.event_env('schedule', {})
+        from chain_controller import Controller, PUBLISH
+        import test_chain_controller as fixtures
+        api = fixtures.FakeAPI()
+        settings = dict(GITHUB_REPOSITORY='owner/repo', DEFAULT_BRANCH='main',
+                        GITHUB_REF='refs/heads/main', GITHUB_RUN_ID='10',
+                        GITHUB_RUN_ATTEMPT='1', GITHUB_EVENT_NAME='schedule')
+        controller = Controller(api, settings, report=lambda *_: None)
+        controller.dispatch(PUBLISH, dict(snapshot_source='auto', mode='refresh',
+                            snapshot_retention_days='7', chain_request_id='u10a1'),
+                            'Pages chain u10a1', fixtures.NOW)
+        env = self.event_env('workflow_dispatch', api.posts[0][1]['inputs'])
         self.assertEqual((env['SOURCE_MODE'], env['MODE'], env['RETENTION_DAYS']), ('auto','refresh','7'))
         self.assertEqual(self.check_inputs(env), 0)
 
@@ -81,7 +91,7 @@ class ScheduleEventTests(unittest.TestCase):
                 self.assertNotIn('if',step)
 
     def test_schedule_missing_key_stops_before_source_update_or_outputs(self):
-        env = self.event_env('schedule', {})
+        env = self.event_env('workflow_dispatch', dict(snapshot_source='auto', mode='refresh', snapshot_retention_days=7))
         with patch.dict(os.environ,env,clear=True), redirect_stderr(io.StringIO()), \
              patch.object(refresh_pages,'prepare_due') as prepare:
             self.assertEqual(refresh_pages.main(['prepare']),1)
