@@ -5,7 +5,7 @@ import os
 import sys
 
 from src.artifact_store import GitHubArtifactClient
-from src.cloud_snapshots import CloudSnapshots
+from src.cloud_snapshots import CloudSnapshots, safe_reason
 
 
 def main(argv=None, *, env=None, client=None):
@@ -19,8 +19,9 @@ def main(argv=None, *, env=None, client=None):
         result = getattr(manager, args.command.replace('-', '_'))()
         print(json.dumps(result, sort_keys=True))
         return 0
-    except (ValueError, KeyError, TypeError, OSError):
+    except (ValueError, KeyError, TypeError, OSError) as error:
         print('Snapshot management failed; publication must stop. Check artifact access and validated input.', file=sys.stderr)
+        print('Failure reason: ' + safe_reason(error), file=sys.stderr)
         return 1
 
 

@@ -17,6 +17,13 @@ ACTIVE = ('queued', 'in_progress', 'waiting', 'pending', 'requested')
 INTERVAL = 600
 READ_ATTEMPTS = 3
 MAX_BODY = 2 * 1024 * 1024
+# Run listings are eventually consistent: a filtered query may briefly report a
+# total_count that disagrees with the rows returned. Re-read a bounded number of
+# times before treating the listing as unusable.
+LISTING_RETRY_DELAYS = (2, 4)
+# After the single dispatch POST, a newly created run can take tens of seconds to
+# appear in filtered listings. Observe for about a minute; never resend the POST.
+RECONCILE_DELAYS = (2, 4, 8, 15, 15, 15)
 
 
 class RelayError(ValueError):
@@ -131,13 +138,19 @@ class Controller:
         return run
 
     def runs(self, workflow, **query):
-        result = self.api.request('GET', '/actions/workflows/' + workflow + '/runs?' +
-                                  urlencode(dict(per_page=100, **query)))
-        if (not isinstance(result, dict) or type(result.get('total_count')) is not int
-                or not isinstance(result.get('workflow_runs'), list)
-                or result['total_count'] != len(result['workflow_runs'])
-                or not 0 <= result['total_count'] <= 100):
-            raise RelayError('incomplete_run_query')
+        path = '/actions/workflows/' + workflow + '/runs?' + urlencode(dict(per_page=100, **query))
+        for attempt in range(len(LISTING_RETRY_DELAYS) + 1):
+            result = self.api.request('GET', path)
+            if (not isinstance(result, dict) or type(result.get('total_count')) is not int
+                    or not isinstance(result.get('workflow_runs'), list)):
+                raise RelayError('incomplete_run_query')
+            if result['total_count'] > 100 or len(result['workflow_runs']) > 100:
+                raise RelayError('incomplete_run_query')  # Too many rows: not transient.
+            if result['total_count'] == len(result['workflow_runs']) and result['total_count'] >= 0:
+                break
+            if attempt == len(LISTING_RETRY_DELAYS):
+                raise RelayError('incomplete_run_query')
+            self.sleep(LISTING_RETRY_DELAYS[attempt])
         rows = [self.validate_run(row, workflow) for row in result['workflow_runs']]
         if len({row['id'] for row in rows}) != len(rows):
             raise RelayError('duplicate_run_query')
@@ -169,14 +182,16 @@ class Controller:
                              {'ref': self.env['DEFAULT_BRANCH'], 'inputs': inputs})
         except RelayError as error:
             self.report('dispatch_response', str(error) + '; reconcile only, no resend')
-        for attempt in range(3):
+        for attempt in range(len(RECONCILE_DELAYS) + 1):
             matches = self.matching(workflow, title, since)
             if len(matches) > 1:
                 raise RelayError('ambiguous_dispatch_identity')
             if matches:
+                if attempt:
+                    self.report('dispatch_confirmed_after_reads', attempt + 1)
                 return matches[0]
-            if attempt < 2:
-                self.sleep((2, 4)[attempt])
+            if attempt < len(RECONCILE_DELAYS):
+                self.sleep(RECONCILE_DELAYS[attempt])
                 self.enabled()
         raise RelayError('dispatch_unconfirmed_no_resend')
 

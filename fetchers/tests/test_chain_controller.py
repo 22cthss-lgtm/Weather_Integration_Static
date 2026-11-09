@@ -34,6 +34,9 @@ class FakeAPI:
         self.lost_response = False
         self.absent_response = False
         self.incomplete = False
+        self.incomplete_reads = 0   # Transiently inconsistent listings before recovery.
+        self.hidden_reads = 0       # Filtered listings that do not yet show a new dispatch.
+        self.overflow = False
         self.calls = []
 
     def request(self, method, path, payload=None):
@@ -62,7 +65,16 @@ class FakeAPI:
             if 'created' in query:
                 since = datetime.fromisoformat(query['created'][0][2:].replace('Z', '+00:00'))
                 rows = [r for r in rows if datetime.fromisoformat(r['created_at']) >= since]
-            return {'total_count': len(rows) + int(self.incomplete), 'workflow_runs': rows}
+                if self.posts and self.hidden_reads:
+                    self.hidden_reads -= 1
+                    rows = [r for r in rows if r['id'] <= 100]
+            if self.overflow:
+                return {'total_count': 101, 'workflow_runs': rows}
+            extra = int(self.incomplete)
+            if self.incomplete_reads:
+                self.incomplete_reads -= 1
+                extra = 1
+            return {'total_count': len(rows) + extra, 'workflow_runs': rows}
         return {'path': '.github/workflows/' + chain.RELAY,
                 'state': 'active' if self.active else 'disabled_manually'}
 
@@ -158,7 +170,37 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(chain.RelayError, 'dispatch_unconfirmed'):
             self.controller.dispatch(chain.PUBLISH, dict(chain_request_id='u10a1'), 'Pages chain u10a1', NOW)
         self.assertEqual(len(self.api.posts), 1)
-        self.assertLess(self.elapsed, 30)
+        self.assertEqual(self.elapsed, sum(chain.RECONCILE_DELAYS))
+        self.assertLessEqual(self.elapsed, 60)
+
+    def test_slow_listing_after_successful_post_is_confirmed_without_resend(self):
+        # Run #27 (2026-11-06): POST created the publisher, but the filtered listing
+        # did not show it within the old ~6 second window, so the chain stopped.
+        self.api.hidden_reads = 5
+        found = self.controller.dispatch(chain.PUBLISH, dict(chain_request_id='u10a1'),
+                                         'Pages chain u10a1', NOW)
+        self.assertEqual(found['id'], 101)
+        self.assertEqual(len(self.api.posts), 1)
+        self.assertEqual(self.elapsed, sum(chain.RECONCILE_DELAYS[:5]))
+        self.assertIn(('dispatch_confirmed_after_reads', 6), self.messages)
+
+    def test_slow_listing_relay_round_still_hands_off(self):
+        self.api.hidden_reads = 3
+        self.controller.relay()
+        self.assertEqual(len(self.api.posts), 2)
+        self.assertTrue(any(k == 'next_relay' for k, _ in self.messages))
+
+    def test_disable_during_reconcile_stops_without_resend(self):
+        self.api.lost_response = self.api.absent_response = True
+        original = self.sleep
+        def stop(seconds):
+            original(seconds)
+            if self.elapsed >= 6:
+                self.api.active = False
+        self.controller.sleep = stop
+        with self.assertRaises(chain.Stopped):
+            self.controller.dispatch(chain.PUBLISH, dict(chain_request_id='u10a1'), 'Pages chain u10a1', NOW)
+        self.assertEqual(len(self.api.posts), 1)
 
     def test_existing_request_reused_without_post(self):
         self.api.rows.append(record(79, chain.PUBLISH, 'Pages chain u10a1'))
@@ -195,9 +237,25 @@ class ControllerTests(unittest.TestCase):
 
     def test_incomplete_query_stops_before_post(self):
         self.api.incomplete = True
-        with self.assertRaises(chain.RelayError):
+        with self.assertRaisesRegex(chain.RelayError, 'incomplete_run_query'):
             self.controller.relay()
         self.assertFalse(self.api.posts)
+        self.assertEqual(self.elapsed, sum(chain.LISTING_RETRY_DELAYS))
+
+    def test_transiently_inconsistent_listing_is_reread_then_used(self):
+        # Run #49 (2026-11-06): one listing reported total_count != rows and the
+        # controller stopped immediately instead of re-reading.
+        self.api.incomplete_reads = 2
+        self.controller.relay()
+        self.assertEqual(len(self.api.posts), 2)
+        self.assertEqual(self.elapsed, 600)
+
+    def test_overflowing_listing_is_not_retried(self):
+        self.api.overflow = True
+        with self.assertRaisesRegex(chain.RelayError, 'incomplete_run_query'):
+            self.controller.relay()
+        self.assertFalse(self.api.posts)
+        self.assertEqual(self.elapsed, 0)
 
     def test_manual_publisher_works_while_controller_disabled(self):
         self.api.active = False

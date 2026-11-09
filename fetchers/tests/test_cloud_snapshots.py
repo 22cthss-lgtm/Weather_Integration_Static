@@ -161,6 +161,97 @@ class CloudTests(unittest.TestCase):
         local.write_bytes(b'{}')
         with self.assertRaises(ValueError):
             self.manager().verify_state()
+    def _flaky(self, method, failures):
+        """Make a client method raise each given error once, then behave normally."""
+        original = getattr(self.client, method)
+        pending = list(failures)
+        def call(*args):
+            if pending:
+                raise pending.pop(0)
+            return original(*args)
+        setattr(self.client, method, call)
+
+    def _install_local_state(self):
+        self.install_state()
+        local = self.root / 'pages-work/state/scheduler-state.json'
+        local.parent.mkdir(parents=True)
+        local.write_bytes(self.client.state_bytes)
+
+    def test_fresh_upload_404_or_missing_digest_is_reread_then_verified(self):
+        # Runs #342/#344/#381/#384 (2026-11-08/09) failed ~0.4 s after upload finalized.
+        from src.artifact_store import ArtifactError
+        from src.cloud_snapshots import READBACK_RETRY_DELAYS
+        self._install_local_state()
+        self.result()
+        sleeps = []
+        self._flaky('get_metadata', [ArtifactError('GitHub request failed (HTTP 404)')])
+        self._flaky('download_state', [ArtifactError('Missing trusted artifact digest')])
+        self.assertEqual(self.manager(sleep=sleeps.append).verify_state()['artifact_id'], 2)
+        self.assertEqual(sleeps, list(READBACK_RETRY_DELAYS[:2]))
+        sleeps.clear()
+        self._flaky('download_artifact', [ArtifactError('Artifact transport failed')])
+        self.assertEqual(self.manager(sleep=sleeps.append).verify_data()['artifact_id'], 1)
+        self.assertEqual(sleeps, [READBACK_RETRY_DELAYS[0]])
+
+    def test_persistent_unavailable_readback_is_bounded_and_stops(self):
+        from src.artifact_store import ArtifactError
+        from src.cloud_snapshots import READBACK_RETRY_DELAYS
+        self._install_local_state()
+        sleeps = []
+        self._flaky('get_metadata', [ArtifactError('GitHub request failed (HTTP 404)')] * 10)
+        with self.assertRaises(ArtifactError):
+            self.manager(sleep=sleeps.append).verify_state()
+        self.assertEqual(sleeps, list(READBACK_RETRY_DELAYS))
+        sleeps.clear()
+        self._flaky('get_metadata', [ArtifactError('Artifact client time budget exhausted')])
+        with self.assertRaisesRegex(ArtifactError, 'time budget'):
+            self.manager(sleep=sleeps.append).verify_state()
+        self.assertEqual(sleeps, [])
+
+    def test_readback_never_retries_mismatch_permission_or_untrusted_run(self):
+        from src.artifact_store import ArtifactPermissionError
+        self._install_local_state()
+        self.result()
+        sleeps = []
+        (self.root / 'pages-work/state/scheduler-state.json').write_bytes(b'{}')
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            self.manager(sleep=sleeps.append).verify_state()
+        self.client.metadata['files'] = {'other': 'different'}
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            self.manager(sleep=sleeps.append).verify_data()
+        self._flaky('download_artifact', [ArtifactPermissionError('denied')])
+        with self.assertRaises(ArtifactPermissionError):
+            self.manager(sleep=sleeps.append).verify_data()
+        self.client.get_run = lambda run_id: {'path': 'other.yml'}
+        with self.assertRaisesRegex(ValueError, 'not trusted'):
+            self.manager(sleep=sleeps.append).verify_state()
+        self.assertEqual(sleeps, [])
+
+    def test_cli_reports_fixed_reason_but_never_values(self):
+        import manage_snapshots
+        import io
+        from src.artifact_store import ArtifactError
+        cases = [(ArtifactError('GitHub request failed (HTTP 404)'), 'ArtifactError: GitHub request failed (HTTP 404)'),
+                 (ValueError('Saved state readback differs from prepared state'),
+                  'ValueError: Saved state readback differs from prepared state'),
+                 (ValueError('ghp1234567890abcdefTOKEN'), 'ValueError'),
+                 (ValueError('Bearer ghp1234567890abcdef0123456789abcdef01234567'), 'ValueError'),
+                 (ValueError('/home/runner/work/secret path'), 'ValueError'),
+                 (ArtifactError('Artifact client time budget exhausted'),
+                  'ArtifactError: Artifact client time budget exhausted'),
+                 (ValueError("Invalid isoformat string: 'x'"), 'ValueError'),
+                 (ValueError('see https://example.invalid/x?sig=abc'), 'ValueError'),
+                 (OSError(2, 'No such file', '/runner/temp/secret path'), 'FileNotFoundError'),
+                 (KeyError('GH_TOKEN'), 'KeyError')]
+        for error, expected in cases:
+            stderr = io.StringIO()
+            with patch.object(manage_snapshots.CloudSnapshots, 'verify_state', side_effect=error):
+                with patch('sys.stderr', stderr):
+                    self.assertEqual(manage_snapshots.main(['verify-state'], env=self.env, client=self.client), 1)
+            self.assertIn('Failure reason: ' + expected + '\n', stderr.getvalue())
+            self.assertNotIn('ghp1234', stderr.getvalue())
+            self.assertNotIn('secret path', stderr.getvalue())
+
     def test_guard_blocks_later_success_across_events(self):
         self.client.runs = [dict(self.client.get_run(11), run_number=6, conclusion='success', event='schedule')]
         with self.assertRaises(ValueError):

@@ -313,7 +313,9 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 
 [pages-manual.yml](../.github/workflows/pages-manual.yml) 的原手動輸入／publish 預設及整批 `pages-manual` 鎖保留；移除直接 cron。控制器不持有發布鎖、不等待子發布完成；入口與派發前查 queued／in_progress／waiting／pending／requested，有工作時記錄 busy，不追加自動發布，但仍等待並接下一控制器。陳舊未完成 run 也不能因年齡被忽略。
 
-發布流程仍是原可信 artifact 生產者，沒有把 artifact 搬到控制器；[cloud_snapshots.py](../fetchers/src/cloud_snapshots.py)／[artifact_store.py](../fetchers/src/artifact_store.py) 的 workflow 路徑、版本 guard、內容去重、保存讀回、線上 marker、失敗備援與清理規則均未更動。手動發布也不啟動接力。資料及 scheduler state 的保存與有效期限仍是 7 天；控制器不保存資料 artifact、不改 JSON、不建資料分支。
+發布流程仍是原可信 artifact 生產者，沒有把 artifact 搬到控制器；[cloud_snapshots.py](../fetchers/src/cloud_snapshots.py)／[artifact_store.py](../fetchers/src/artifact_store.py) 的 workflow 路徑、版本 guard、內容去重、保存讀回、線上 marker、失敗備援與清理規則均未更動。
+
+保存後讀回（`verify-data`／`verify-state`）於 2026-11-10 加入有界重讀：剛 finalize 的 artifact 讀取若遇 404、尚無 digest、傳輸或 digest 不符等 `ArtifactError`，整段讀回（重取 metadata、可信 run、下載、外 digest）最多再做三次（間隔 3／6／12 秒）。權限錯誤、內容／bytes 與準備資料不符、來源 run 不可信、壞 state 均不重試，立即停止部署。線上 Pages chain #342／#344／#381／#384 皆在 finalize 後約 0.4 秒失敗。CLI 失敗時另印 `Failure reason:`，只顯示固定訊息（例如 `GitHub request failed (HTTP 404)`），其他錯誤只顯示例外型別，不輸出路徑、網址或文件內容。手動發布也不啟動接力。資料及 scheduler state 的保存與有效期限仍是 7 天；控制器不保存資料 artifact、不改 JSON、不建資料分支。
 
 ### 識別碼、去重及回應遺失
 
@@ -321,11 +323,11 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 
 去重紀錄是 GitHub Actions 的 run metadata（`display_title`、ID、attempt、event、branch、workflow path、created_at），不是公開 JSON，也不是 7 天 scheduler-state artifact。其保留期限取決於 repository Actions 執行紀錄政策，不在本批改動。不得任意刪除仍用於接力查證的執行紀錄。
 
-每個邏輯派發最多一次 POST。派發前先找同識別碼；找到一份就沿用，找到多份則停止。HTTP 逾時、5xx、回應截斷或其他結果不明時，只做最多三輪完整查證（輪間 2／4 秒），不重新 POST。確認不到就報 `dispatch_unconfirmed_no_resend`，交由未來 cron 重新 seed，不能當作派發成功。即使 POST 回成功，也須查到匹配 run 才記錄成功派發。
+每個邏輯派發最多一次 POST。派發前先找同識別碼；找到一份就沿用，找到多份則停止。HTTP 逾時、5xx、回應截斷或其他結果不明時，只做最多七輪完整查證（輪間 2／4／8／15／15／15 秒，約 59 秒），不重新 POST；每輪之間重讀控制器開關，停用即停止。2026-11-10 起由原三輪（約 6 秒）放寬：線上 Relay #27 在 POST 已建立發布 run 後，篩選列表約 6 秒內仍未顯示該 run 而安全停止，導致接力中斷約 3.4 小時。確認不到就報 `dispatch_unconfirmed_no_resend`，交由未來 cron 重新 seed，不能當作派發成功。即使 POST 回成功，也須查到匹配 run 才記錄成功派發。
 
 發布 admission 在原整批鎖內執行：核對 parent workflow／ID／attempt／branch、目前 run 是否出現在完整查詢，已有更早同識別碼 run 則略過 build。自動請求不允許 rerun 重做抓取，需由新控制器產生新識別碼。普通手動輸入不需控制器或 token 即可通過 admission，原發布校驗照常執行。
 
-每次列表查詢最多讀 100 份符合條件的 run，total_count 必須等於實際筆數，拒絕超限、重複 ID、錯誤型別與不一致身分；不截斷後猜測。父 run 遺失則停止。GitHub 刪除的舊執行不會留在清單，不能證明曾經不存在：因此不支援刪紀錄後重播舊識別碼，也沒有另建長期去重帳本。單次 POST 規則避免本控制器因回應遺失而主動產生第二份派發。
+每次列表查詢最多讀 100 份符合條件的 run，total_count 必須等於實際筆數，拒絕超限、重複 ID、錯誤型別與不一致身分；不截斷後猜測。total_count 與筆數暫時不一致（線上 Relay #49 曾因此停止）時，同一查詢最多再讀兩次（間隔 2／4 秒），仍不一致才報 `incomplete_run_query`；超過 100 筆不重讀，直接停止。父 run 遺失則停止。GitHub 刪除的舊執行不會留在清單，不能證明曾經不存在：因此不支援刪紀錄後重播舊識別碼，也沒有另建長期去重帳本。單次 POST 規則避免本控制器因回應遺失而主動產生第二份派發。
 
 ### 停止與有界失敗
 

@@ -7,7 +7,9 @@ import hashlib
 import json
 import re
 from pathlib import Path
+import sys
 import tempfile
+import time
 from urllib.parse import urlsplit
 
 import requests
@@ -21,6 +23,27 @@ from .scheduling import default_tasks, restore_state
 WORKFLOW = '.github/workflows/pages-manual.yml'
 TTL_SECONDS = 604800
 STATE_CANDIDATE_LIMIT = 12
+# A just-finalized artifact can briefly be missing (404) or lack its digest in the
+# API. Re-read the whole readback a bounded number of times; content mismatches,
+# permission failures and invalid documents are never retried.
+READBACK_RETRY_DELAYS = (3, 6, 12)
+
+
+def safe_reason(error):
+    """Name a failure without echoing paths, URLs, tokens or document contents.
+
+    Only fixed sentences are shown, such as "GitHub request failed (HTTP 404)":
+    letters, digits, single spaces, parentheses and slash; at least two words, each
+    at most 16 characters and not starting with "/". Anything else (possible tokens,
+    paths, URLs or document values) is reported by exception type only.
+    """
+    message = str(error)
+    words = message.split(' ')
+    if ((isinstance(error, ArtifactError) or type(error) is ValueError)
+            and len(words) >= 2 and re.fullmatch(r'[A-Za-z0-9 ()/]{1,120}', message)
+            and all(0 < len(word) <= 16 and not word.startswith('/') for word in words)):
+        return type(error).__name__ + ': ' + message
+    return type(error).__name__
 
 
 def _read_json(path):
@@ -72,8 +95,9 @@ def validate_state(blob, content_id, now):
 
 
 class CloudSnapshots:
-    def __init__(self, client, env, *, now=None, unpack=unpack_snapshot, public_get=public_marker):
-        self.client, self.env = client, env
+    def __init__(self, client, env, *, now=None, unpack=unpack_snapshot, public_get=public_marker,
+                 sleep=time.sleep):
+        self.client, self.env, self.sleep = client, env, sleep
         self.now = now or datetime.now(timezone.utc)
         self.unpack, self.public_get = unpack, public_get
         self.root = Path(env['RUNNER_TEMP'])
@@ -185,9 +209,25 @@ class CloudSnapshots:
         _write_json(self.root / 'online-deployment.json', result)
         return result
 
+    def _readback(self, read):
+        """Retry only transport/availability errors of a freshly uploaded artifact."""
+        for attempt in range(len(READBACK_RETRY_DELAYS) + 1):
+            try:
+                return read()
+            except ArtifactPermissionError:
+                raise
+            except ArtifactError as error:
+                # The client's overall time budget never recovers within this process.
+                if attempt == len(READBACK_RETRY_DELAYS) or 'time budget' in str(error):
+                    raise
+                print('Readback attempt %d not yet available (%s); retrying.'
+                      % (attempt + 1, safe_reason(error)), file=sys.stderr)
+                self.sleep(READBACK_RETRY_DELAYS[attempt])
+
     def verify_data(self):
         expected = _read_json(self.root / 'pages-input-result.json')
-        record, blob, metadata = self._snapshot(self.env['DATA_ARTIFACT_ID'], allow_current=True)
+        record, blob, metadata = self._readback(
+            lambda: self._snapshot(self.env['DATA_ARTIFACT_ID'], allow_current=True))
         sha = hashlib.sha256(blob).hexdigest()
         if sha != expected['sha256'] or any(metadata.get(key) != expected.get(key) for key in ('snapshot_id', 'files', 'content_id', 'content_created_at')):
             raise ValueError('Saved data readback differs from prepared data')
@@ -197,10 +237,12 @@ class CloudSnapshots:
         return result
 
     def verify_state(self):
-        record = self.client.get_metadata(int(self.env['STATE_ARTIFACT_ID']))
-        if not self._trusted(record, allow_current=True):
-            raise ValueError('Saved state source run is not trusted')
-        blob = self.client.download_state(record)
+        def read():
+            record = self.client.get_metadata(int(self.env['STATE_ARTIFACT_ID']))
+            if not self._trusted(record, allow_current=True):
+                raise ValueError('Saved state source run is not trusted')
+            return record, self.client.download_state(record)
+        record, blob = self._readback(read)
         local = (self.root / 'pages-work/state/scheduler-state.json').read_bytes()
         if blob != local:
             raise ValueError('Saved state readback differs from prepared state')

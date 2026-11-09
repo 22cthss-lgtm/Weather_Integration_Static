@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
+import { taipeiDate } from "./useCurrentImage";
 
 const types = ["radar", "satellite", "rainfall"];
 const products = Object.fromEntries(types.map(type => [type,
@@ -45,8 +46,43 @@ test.each(types)("%s detail reads actual current-day Fetcher output", async type
   render(<MemoryRouter initialEntries={[`/images/${type}`]}><App /></MemoryRouter>);
   await screen.findByAltText(product.title);
   const options = await screen.findAllByRole("option");
-  expect(options.map(option => option.value)).toEqual(history.items.map(item => item.image_time));
+  // The page always offers the latest successful image as a slot, even when the
+  // day's history file has not caught up yet. Shortly after Taipei midnight the
+  // previous day's file is no longer extended while its 23:xx latest is still
+  // published, so the history items alone are not the expected option list.
+  const expected = [...new Set([
+    ...history.items.map(item => item.image_time).filter(time => taipeiDate(time) === date),
+    product.image_time,
+  ])].sort();
+  expect(options.map(option => option.value)).toEqual(expected);
   expect(screen.getByRole("combobox").value).toBe(product.image_time);
+});
+
+test("latest published after the day's history stopped still appears as the newest slot", async () => {
+  // Reproduces Pages chain runs #161-164 and #302-304: just after Taipei midnight the
+  // 23:30 latest image exists but that day's history file stops at 23:00.
+  const latest = { ...products.radar, image_time: "2026-11-07T23:30:00+08:00" };
+  const items = ["2026-11-07T22:30:00+08:00", "2026-11-07T23:00:00+08:00"]
+    .map(image_time => ({ ...products.radar, image_time }));
+  const files = {
+    "/data/images/radar/latest.json": latest,
+    "/data/images/radar/history/2026-11-07.json": {
+      image_type: "radar", date: "2026-11-07", items, complete: true,
+      range_end: "2026-11-07T23:00:00+08:00",
+    },
+  };
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(latest.image_time));
+  vi.stubGlobal("fetch", vi.fn(async url => {
+    if (!(url in files)) throw new Error(`unexpected ${url}`);
+    return { ok: true, json: async () => files[url] };
+  }));
+  render(<MemoryRouter initialEntries={["/images/radar"]}><App /></MemoryRouter>);
+  await screen.findByAltText(latest.title);
+  const options = await screen.findAllByRole("option");
+  expect(options.map(option => option.value)).toEqual([...items.map(item => item.image_time), latest.image_time]);
+  expect(screen.getByRole("combobox").value).toBe(latest.image_time);
+  await screen.findByText(/歷史清單尚未涵蓋最新圖/);
 });
 
 test.each(types)("%s retained output stays visible without yesterday's time options", async type => {
