@@ -1,13 +1,14 @@
 {
   "schema_version": 1,
-  "artifact_retention_days": 7,
-  "zip_valid_days": 7,
+  "artifact_retention_days": 15,
+  "zip_valid_days": 15,
   "state_ttl_seconds": 604800,
   "fixed": {"max_lateness_days": 1},
   "history": {
     "interval_seconds": 3600,
     "max_rechecks": 3,
     "max_slots_per_run": 12,
-    "current_day_only": true
+    "current_day_only": true,
+    "keep_past_dates": false
   }
 }

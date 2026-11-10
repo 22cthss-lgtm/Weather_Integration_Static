@@ -6,7 +6,7 @@
 本功能延用 `.github/workflows/pages-manual.yml`。本文保留前版 explicit 操作紀錄；目前
 另有每十分鐘 schedule，固定 auto＋refresh；手動 Run workflow 仍保留。沒有 push
 觸發、自動 commit JSON 或資料分支。目前 explicit 操作須先選 snapshot_source=explicit，
-資料與狀態期限依已確認政策固定七天；以下早期技術範圍描述不代表可自行調整政策。
+資料期限依已確認政策為 15 天、狀態 7 天（2026-11-10 起）；以下早期技術範圍描述不代表可自行調整政策。
 
 ## 操作與輸入
 

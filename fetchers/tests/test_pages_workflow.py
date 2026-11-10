@@ -48,7 +48,7 @@ class PagesWorkflowTests(unittest.TestCase):
         workflow = yaml.load(path.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         inputs = workflow['on']['workflow_dispatch']['inputs']
         self.assertEqual(inputs['mode']['options'], ['publish', 'refresh'])
-        self.assertEqual(inputs['snapshot_retention_days']['default'], '7')
+        self.assertEqual(inputs['snapshot_retention_days']['default'], '15')
         self.assertEqual(inputs['snapshot_retention_days']['required'], 'true')
         build = workflow['jobs']['build']
         self.assertEqual(build['permissions']['actions'], 'read')

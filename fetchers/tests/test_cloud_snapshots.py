@@ -227,6 +227,17 @@ class CloudTests(unittest.TestCase):
             self.manager(sleep=sleeps.append).verify_state()
         self.assertEqual(sleeps, [])
 
+    def test_cleanup_gets_larger_bounded_client_budget(self):
+        import manage_snapshots
+        env = dict(self.env, GITHUB_REPOSITORY='owner/repo', GH_TOKEN='x')
+        budgets = {}
+        for command in ('cleanup', 'verify-state'):
+            with patch.object(manage_snapshots, 'GitHubArtifactClient') as client, \
+                    patch.object(manage_snapshots.CloudSnapshots, command.replace('-', '_'), return_value={}):
+                self.assertEqual(manage_snapshots.main([command], env=env), 0)
+                budgets[command] = client.call_args.kwargs['total_timeout']
+        self.assertEqual(budgets, {'cleanup': 300, 'verify-state': 120})
+
     def test_cli_reports_fixed_reason_but_never_values(self):
         import manage_snapshots
         import io

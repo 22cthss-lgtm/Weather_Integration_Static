@@ -1,6 +1,6 @@
 """Due-only orchestration built on the common candidate and package publishers."""
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -13,6 +13,8 @@ from .publication import atomic_write_json
 from .scheduling import default_tasks, is_due, restore_state, record_result
 from .snapshot_runner import belongs, run_candidate
 from .snapshots import read_resources
+
+TAIPEI = timezone(timedelta(hours=8))
 
 
 class DeploymentSafetyError(ValueError):
@@ -179,7 +181,11 @@ def prepare_due(archive, sha256, work, *, mode, policy, task_config=None, state_
             if failure and not latest_ok:
                 raise RuntimeError('Resource check failed; validated fallback retained')
 
-        report = run_candidate(chosen, seed, work / 'store', checked_update, allow_empty=True)
+        # Refresh drops past-day history inventories (user-confirmed 2026-11-10); the
+        # explicit publish path republishes the seed unchanged.
+        prune = mode == 'refresh' and policy['history'].get('keep_past_dates', True) is False
+        report = run_candidate(chosen, seed, work / 'store', checked_update, allow_empty=True,
+                               history_today=now.astimezone(TAIPEI).date() if prune else None)
         snapshot = work / 'store/snapshots' / str(report['snapshot_id'])
         data_root = snapshot / 'data' if report['publishable'] else seed
         content = content_metadata(data_root, hashes if report['publishable'] else selected['content']['image_hashes'], now.isoformat())

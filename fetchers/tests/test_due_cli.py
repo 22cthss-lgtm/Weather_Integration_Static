@@ -52,7 +52,7 @@ class DueCliTests(unittest.TestCase):
             export_snapshot(Path(__file__).resolve().parents[2]/'frontend/public/data', root/'seed')
             package = pack_snapshot(root/'seed', root/'input.zip')
             (root/'source-state.json').write_text('broken JSON')
-            env = {'MODE':'publish','RETENTION_DAYS':'7','RUNNER_TEMP':str(root),
+            env = {'MODE':'publish','RETENTION_DAYS':'15','RUNNER_TEMP':str(root),
                    'ARCHIVE':str(root/'input.zip'),'ASSET_SHA':package['sha256'],'WORK':str(root/'work'),
                    'RESULT':str(root/'result.json'),'GITHUB_STEP_SUMMARY':str(root/'summary.md'),
                    'GITHUB_OUTPUT':str(root/'outputs.txt')}
@@ -66,7 +66,7 @@ class DueCliTests(unittest.TestCase):
 
     def test_auto_inputs_require_no_manual_ids_and_match_confirmed_policy(self):
         import refresh_pages
-        env = {'MODE':'refresh','SOURCE_MODE':'auto','RETENTION_DAYS':'7'}
+        env = {'MODE':'refresh','SOURCE_MODE':'auto','RETENTION_DAYS':'15'}
         with patch.dict(os.environ, env, clear=True), redirect_stderr(io.StringIO()):
             self.assertEqual(refresh_pages.main(['inputs']), 0)
             os.environ['ASSET_SHA']='a'*64

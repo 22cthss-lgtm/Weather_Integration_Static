@@ -303,7 +303,7 @@ class CloudSnapshots:
                 except (ValueError, KeyError, OSError):
                     continue
             deletions.extend(cleanup_plan(records, content_id, content_id, True, True,
-                                          protected_artifact_ids=[saved_record['id']]))
+                                          protected_artifact_ids=[saved_record['id']], now=self.now))
         # State cleanup is independent of a data deploy, but requires this run's
         # fresh state to survive an authenticated download and schema validation.
         state_verified, states = False, []

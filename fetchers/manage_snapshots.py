@@ -14,7 +14,11 @@ def main(argv=None, *, env=None, client=None):
     args = parser.parse_args(argv)
     env = os.environ if env is None else env
     try:
-        client = client or GitHubArtifactClient(env['GITHUB_REPOSITORY'], env['GH_TOKEN'])
+        # Cleanup re-verifies every retained snapshot (tiered retention keeps ~30),
+        # so it gets a larger overall budget; other commands keep the default.
+        budget = 300 if args.command == 'cleanup' else 120
+        client = client or GitHubArtifactClient(env['GITHUB_REPOSITORY'], env['GH_TOKEN'],
+                                                total_timeout=budget)
         manager = CloudSnapshots(client, env)
         result = getattr(manager, args.command.replace('-', '_'))()
         print(json.dumps(result, sort_keys=True))

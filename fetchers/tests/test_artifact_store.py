@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
@@ -113,11 +114,66 @@ class ArtifactTests(unittest.TestCase):
         records += [{'id': 200 + n, 'name': 'weather-scheduler-state', 'verified': True,
                      'created_at': f'2026-10-{n:02d}T00:00:00Z'} for n in range(1, 5)]
         args = (records, '1', '8', True, True)
-        self.assertEqual(set(cleanup_plan(*args)), {2, 3, 99, 201, 202})
+        later = datetime(2026, 12, 1, tzinfo=timezone.utc)  # outside all anchor windows
+        self.assertEqual(set(cleanup_plan(*args, now=later)), {2, 99, 201, 202})
         self.assertEqual(cleanup_plan(records, None, '8', True, True), [])
         self.assertEqual(cleanup_plan(records, '1', '8', False, True), [])
         self.assertEqual(cleanup_plan(records, 'missing', '8', True, True), [])
-        self.assertNotIn(99, cleanup_plan(*args, protected_artifact_ids=[99]))
+        self.assertNotIn(99, cleanup_plan(*args, protected_artifact_ids=[99], now=later))
+
+    def _versions(self, instants):
+        return [{'id': n, 'name': 'weather-snapshot', 'content_id': 'c%d' % n,
+                 'content_created_at': value, 'verified': True} for n, value in enumerate(instants, 1)]
+
+    def test_tiered_retention_keeps_recent_six_hour_and_daily_anchors(self):
+        from src.artifact_store import cleanup_plan
+        now = datetime(2026, 11, 20, 4, 0, tzinfo=timezone.utc)  # 12:00 Taipei
+        # One version every 10 minutes for 20 days (2880 versions).
+        instants = [(now - timedelta(minutes=10 * k)).isoformat() for k in range(20 * 144)]
+        records = self._versions(instants)
+        keep = {r['id'] for r in records} - set(cleanup_plan(records, 'c1', 'c1', True, True, now=now))
+        kept = sorted(datetime.fromisoformat(records[i - 1]['content_created_at']) for i in keep)
+        self.assertTrue({1, 2, 3, 4, 5, 6} <= keep)          # newest six
+        recent = [t for t in kept if t >= now - timedelta(hours=1)]
+        self.assertEqual(len(recent), 6)
+        taipei = timezone(timedelta(hours=8))
+        six = {(t.astimezone(taipei).date(), t.astimezone(taipei).hour // 6) for t in kept
+               if t >= now - timedelta(hours=48)}
+        self.assertEqual(len(six), 9)                        # 48 h spans 9 six-hour buckets here
+        days = {t.astimezone(taipei).date() for t in kept}
+        self.assertEqual(len(days), 15)                      # today + 14 previous Taipei dates
+        self.assertFalse(any(t < now - timedelta(days=14) for t in kept))
+        self.assertLessEqual(len(keep), 6 + 9 + 15)
+        # Each anchor is the newest version of its bucket (end of the Taipei day).
+        last_of_day = max(t for t in kept if t.astimezone(taipei).date().isoformat() == '2026-11-10')
+        self.assertEqual(last_of_day.astimezone(taipei).strftime('%H:%M'), '23:50')
+
+    def test_daily_buckets_follow_taipei_not_utc_dates(self):
+        from src.artifact_store import retained_versions, RECENT_VERSIONS
+        now = datetime(2026, 11, 20, 0, 0, tzinfo=timezone.utc)
+        recent = {'r%d' % k: now - timedelta(minutes=k) for k in range(RECENT_VERSIONS)}
+        # 15:50Z and 16:10Z on Nov 15 are different Taipei dates (23:50 / 00:10).
+        older = {'before': datetime(2026, 11, 15, 15, 50, tzinfo=timezone.utc),
+                 'early': datetime(2026, 11, 15, 15, 0, tzinfo=timezone.utc),
+                 'after': datetime(2026, 11, 15, 16, 10, tzinfo=timezone.utc)}
+        kept = retained_versions(dict(recent, **older), now)
+        self.assertIn('before', kept)
+        self.assertIn('after', kept)
+        self.assertNotIn('early', kept)
+
+    def test_tiered_retention_keeps_online_saved_and_fails_closed(self):
+        from src.artifact_store import cleanup_plan
+        now = datetime(2026, 11, 20, tzinfo=timezone.utc)
+        instants = [(now - timedelta(minutes=10 * k)).isoformat() for k in range(200)]
+        instants.append('2026-10-01T00:00:00+00:00')         # old online version
+        records = self._versions(instants)
+        old = len(records)
+        deletions = cleanup_plan(records, 'c%d' % old, 'c1', True, True, now=now)
+        self.assertNotIn(old, deletions)
+        self.assertNotIn(1, deletions)
+        self.assertTrue(deletions)
+        # A naive (timezone-less) reference time is rejected: nothing is deleted.
+        self.assertEqual(cleanup_plan(records, 'c1', 'c1', True, True, now=datetime(2026, 11, 20)), [])
 
     def test_metadata_from_caller_cannot_supply_digest(self):
         from src.artifact_store import ArtifactError
@@ -155,8 +211,8 @@ class ArtifactTests(unittest.TestCase):
         records = [{'id': n, 'name': 'weather-snapshot', 'content_id': str(n),
                     'content_created_at': f'2026-10-{n:02d}T00:00:00Z', 'verified': True} for n in range(1, 9)]
         records.append(dict(records[0], id=99, content_created_at='2026-10-29T00:00:00Z'))
-        deletions = cleanup_plan(records, '8', '8', True, True)
-        self.assertEqual(set(deletions), {1, 2, 3, 99})
+        deletions = cleanup_plan(records, '8', '8', True, True, now=datetime(2026, 12, 1, tzinfo=timezone.utc))
+        self.assertEqual(set(deletions), {1, 2, 99})
         records.append({'id': 100, 'name': 'weather-snapshot', 'verified': False})
         self.assertEqual(cleanup_plan(records, '8', '8', True, True), [])
 

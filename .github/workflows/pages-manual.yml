@@ -25,9 +25,9 @@ on:
         required: false
         type: string
       snapshot_retention_days:
-        description: 'Online test setting only: artifact and ZIP validity 7 days'
+        description: 'Data snapshot artifact and ZIP validity: 15 days (must match policy)'
         required: true
-        default: 7
+        default: 15
         type: number
       snapshot_release:
         description: 'Exact Release tag containing the uploaded snapshot ZIP'
@@ -240,7 +240,8 @@ jobs:
         with:
           name: weather-scheduler-state
           path: ${{ runner.temp }}/pages-work/state/scheduler-state.json
-          retention-days: ${{ env.RETENTION_DAYS }}
+          # State content itself expires after 7 days (state_ttl_seconds).
+          retention-days: 7
           if-no-files-found: error
       - name: Download and verify saved scheduler state
         env:

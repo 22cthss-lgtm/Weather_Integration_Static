@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import tempfile
 from uuid import uuid4
 
@@ -17,8 +18,42 @@ def belongs(name, product):
     return name.startswith(prefix)
 
 
-def run_candidate(products, seed_data, store, update, *, allow_empty=False):
-    """Never edit the seed/public directory; all mutations happen in a temp tree."""
+CURRENT_KINDS = ('radar', 'satellite', 'rainfall')
+HISTORY_FILE = re.compile(r'images/(radar|satellite|rainfall)/history/(\d{4}-\d{2}-\d{2})\.json')
+
+
+def _prune_past_history(candidate, today):
+    """Remove day inventories other than Taipei ``today`` and each product's latest date.
+
+    The latest image's own day stays, because the snapshot contract requires it
+    (shortly after midnight the latest can still be yesterday 23:xx). Only exact
+    ``images/{radar,satellite,rainfall}/history/YYYY-MM-DD.json`` paths are touched.
+    """
+    keep = {kind: {today.isoformat()} for kind in CURRENT_KINDS}
+    for kind in CURRENT_KINDS:
+        latest = candidate / 'images' / kind / 'latest.json'
+        if latest.is_file():
+            keep[kind].add(json.loads(latest.read_text(encoding='utf-8'))['image_time'][:10])
+    pruned = []
+    for kind in CURRENT_KINDS:
+        folder = candidate / 'images' / kind / 'history'
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.iterdir()):
+            name = path.relative_to(candidate).as_posix()
+            match = HISTORY_FILE.fullmatch(name)
+            if match and path.is_file() and match[2] not in keep[kind]:
+                path.unlink()
+                pruned.append(name)
+    return pruned
+
+
+def run_candidate(products, seed_data, store, update, *, allow_empty=False, history_today=None):
+    """Never edit the seed/public directory; all mutations happen in a temp tree.
+
+    With ``history_today`` (an Asia/Taipei date), past-day history inventories are
+    removed after all updates; see ``_prune_past_history``. Default keeps them.
+    """
     products = list(dict.fromkeys(products))
     if not products and not allow_empty:
         raise ValueError('At least one product is required')
@@ -64,8 +99,9 @@ def run_candidate(products, seed_data, store, update, *, allow_empty=False):
                         p.parent.mkdir(parents=True, exist_ok=True)
                         p.write_bytes(content)
                         invalid_outputs.add(name)
+            pruned = _prune_past_history(candidate, history_today) if history_today is not None else []
             after, _ = read_resources(candidate)
-            expected = set(REQUIRED) | set(before) | set(after)
+            expected = set(REQUIRED) | (set(before) - set(pruned)) | set(after)
             # Each current-image latest must have its corresponding day inventory.
             for kind in ('radar', 'satellite', 'rainfall'):
                 latest = after.get(f'images/{kind}/latest.json')
@@ -100,9 +136,11 @@ def run_candidate(products, seed_data, store, update, *, allow_empty=False):
                 'schema_version': 1, 'run_id': run_id, 'started_at': started,
                 'finished_at': datetime.now(timezone.utc).isoformat(),
                 'invalid_seed_count': len(invalid), 'products': products_report, 'resources': resources,
-                'updated_count': updated, 'complete': complete,
+                'updated_count': updated, 'complete': complete, 'pruned_history': pruned,
                 'publishable': complete and updated > 0, 'snapshot_id': None,
             }
+            # Only report removals that actually ship; an unpublished candidate is discarded.
+            report['pruned_history'] = pruned if report['publishable'] else []
             if report['publishable']:
                 snapshot = store / 'snapshots' / run_id
                 manifest = export_snapshot(candidate, snapshot, snapshot_id=run_id)

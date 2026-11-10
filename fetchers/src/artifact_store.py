@@ -4,7 +4,7 @@ Only GitHub API metadata supplies the outer archive digest. Inner validators mus
 verify the package/manifest and return trusted content identity and creation time.
 No credentials or downloaded signed URLs are persisted or included in errors.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
 import io
@@ -287,12 +287,38 @@ def recover_snapshot(client, validate_inner, target, *, workflow, default_branch
     return max(versions.values(), key=lambda item: item[0])[1] if versions else None
 
 
+RECENT_VERSIONS = 6
+ANCHOR_HOURS = 6
+ANCHOR_HOURS_WINDOW = timedelta(hours=48)
+DAILY_WINDOW = timedelta(days=14)
+TAIPEI = timezone(timedelta(hours=8))
+
+
+def retained_versions(created, now):
+    """Content IDs to keep: newest versions plus 6-hour and daily Asia/Taipei anchors.
+
+    ``created`` maps content_id -> first creation instant. Each anchor bucket keeps
+    its newest version; buckets are judged by content creation, not upload time.
+    """
+    ordered = sorted(created, key=lambda key: created[key], reverse=True)
+    keep = set(ordered[:RECENT_VERSIONS])
+    six_hour, daily = {}, {}
+    for key in ordered:  # newest first, so the first seen per bucket is its newest
+        local = created[key].astimezone(TAIPEI)
+        if created[key] >= now - ANCHOR_HOURS_WINDOW:
+            six_hour.setdefault((local.date(), local.hour // ANCHOR_HOURS), key)
+        if created[key] >= now - DAILY_WINDOW:
+            daily.setdefault(local.date(), key)
+    return keep | set(six_hour.values()) | set(daily.values())
+
+
 def cleanup_plan(records, online_content_id, saved_content_id, verified_saved,
-                 deployment_confirmed, *, protected_artifact_ids=()):
+                 deployment_confirmed, *, protected_artifact_ids=(), now=None):
     """Return safe deletions from trusted, manifest-verified record inventory.
 
     Records need id/name/verified/content_id/content_created_at; separate state
     records need verified/created_at. Unknown or incomplete protection fails closed.
+    Snapshot versions are kept by ``retained_versions`` plus the online version.
     """
     if not (online_content_id and saved_content_id and verified_saved and deployment_confirmed):
         return []
@@ -308,7 +334,8 @@ def cleanup_plan(records, online_content_id, saved_content_id, verified_saved,
         if online_content_id not in groups or saved_content_id not in groups:
             return []
         created = {key: min(_instant(r['content_created_at']) for r in group) for key, group in groups.items()}
-        keep_versions = set(sorted(groups, key=lambda key: created[key], reverse=True)[:5])
+        reference = _instant(now.isoformat()) if now is not None else max(created.values())
+        keep_versions = retained_versions(created, reference)
         keep_versions.add(online_content_id)
         if saved_content_id not in keep_versions:
             return []
@@ -327,5 +354,5 @@ def cleanup_plan(records, online_content_id, saved_content_id, verified_saved,
                 return []
         keep.update(r['id'] for r in sorted(states, key=lambda r: _instant(r['created_at']), reverse=True)[:2])
         return [r['id'] for r in snapshots + states if r['id'] not in keep]
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, AttributeError):
         return []

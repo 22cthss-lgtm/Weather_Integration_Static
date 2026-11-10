@@ -3,7 +3,7 @@
 - 盤點日期：2026-11-06（Asia/Taipei）。
 - 程式基準：`main`，commit `903c7caeaf1f49931ebe0463ae85e2a8887a69cb`，加上本批獨立接力控制器；此 SHA 是實作前基準。第 13 節描述程式行為，線上啟用與驗收結果另記本機 HANDOFF。
 - 依據：直接閱讀入口、Services、發布／快照、workflow 與前端程式；隔離真來源結果見第 8 節，先前手動雲端結果見本機 HANDOFF 第 14 節及本文第 11 節的界線摘要。
-- history v2 與先前來源／恢復修正維持不變。本批只實作接力入口、停止與去重保護，沒有改各圖資到期、歷史或保存政策。第 12 節保留先前 cron 直接入口紀錄；接力線上驗收須有真實 run 證據，不把模擬事件當作接力成功。
+- history v2 與先前來源／恢復修正維持不變。本批只實作接力入口、停止與去重保護，沒有改各圖資到期、歷史或保存政策（保存政策於 2026-11-10 另行調整，見第 4 節保存政策現況）。第 12 節保留先前 cron 直接入口紀錄；接力線上驗收須有真實 run 證據，不把模擬事件當作接力成功。
 - **維護要求：之後修改資料流、Fetcher、恢復／發布或前端讀取行為時，應同步更新本文件、盤點日期與程式基準。**
 
 HANDOFF.md 與本機 .runtime 驗收證據不納入版本控制；相關連結供本機維護使用。
@@ -56,7 +56,7 @@ flowchart TD
     PG --> BR
     BR --> IMG
     Q --> RC
-    RC -->|閒置時 dispatch auto＋refresh＋7天| J
+    RC -->|閒置時 dispatch auto＋refresh＋15天| J
     RC --> RW
     RW -->|仍啟用：dispatch 下一控制器| Q
 ```
@@ -107,7 +107,7 @@ flowchart TD
 | 手動 auto＋refresh | auto 恢復可信 artifact，refresh 選到期任務與已知 history 缺口 | 隔離候選；有效新內容才存新資料 ZIP，部署另看線上版本；無變更亦可補部署（第九節） | 獨立保存成功檢查、退避及歷史缺口；入口目前要求 CWA key |
 | 手動 auto＋publish | 恢復所選資料，不執行氣象 Service | 建置／部署原有效資料；不建立新資料版本或延長輸入 ZIP 期限 | 仍處理並保存 scheduler state |
 | 手動 explicit | 與 refresh／publish 正交；指定 Run 或 Release ZIP 及 SHA | 使用相同 prepare_due 後續流程 | 不自動恢復舊 scheduler artifact，通常重新初始化到期狀態；auto 不搜尋 Release |
-| 自動控制器（cron／接力） | 控制器約每十分鐘檢查，閒置時 dispatch 明確 auto＋refresh；仍只執行 due／history_due | 發布子 run 與手動 auto＋refresh 相同；busy 不追加工作 | 資料／state 七天；控制器獨立鎖，發布子 run 共用原手動鎖與保護；見第 13 節 |
+| 自動控制器（cron／接力） | 控制器約每十分鐘檢查，閒置時 dispatch 明確 auto＋refresh；仍只執行 due／history_due | 發布子 run 與手動 auto＋refresh 相同；busy 不追加工作 | 資料 15 天／state 7 天；控制器獨立鎖，發布子 run 共用原手動鎖與保護；見第 13 節 |
 
 到期與 fixed-time primitives 已在 [scheduling.py](../fetchers/src/scheduling.py) 實作，但目前十三項均為 interval，設定見 [due-intervals.json](../fetchers/policies/due-intervals.json)。只有工作被啟動後才判斷到期，不會自行喚醒。控制器接受 schedule／workflow_dispatch，再以 workflow_dispatch 呼叫發布入口；沒有 push 觸發。先前直接 cron 的紀錄見第 12 節；線上即時狀態及驗收證據見本機 HANDOFF。
 
@@ -133,7 +133,7 @@ flowchart TD
 
 依 [workflow](../.github/workflows/pages-manual.yml)，需要部署或保存新資料時先測試、build，再保存資料／狀態並讀回驗證；只有部署決策為真才上傳網站 artifact、部署。refresh 內容未變且已在線上時跳過測試／build／部署；線上未知而未變亦會安全延後部署。已存未上線的內容符合第九節條件即可補部署，仍不保存新資料 ZIP。publish 也會測試與 build，但不讀氣象來源。
 
-保存政策現況：資料主動保留最近五個不同整站版本，加受保護線上版本；狀態另留最近兩份。資料 artifact／ZIP、狀態 artifact 目前為七天測試設定，Pages 網站 artifact 一天。主動清理保護不能阻止平台到期，ZIP 包內到期亦獨立檢查。長期保存政策未定。
+保存政策現況（2026-11-10 起）：資料依分層保留——最新 6 個版本、48 小時內每 6 小時（台北時間）最新一版、14 天內每個台北日期最新一版，加受保護線上版本；狀態另留最近兩份。資料 artifact／ZIP 15 天，狀態 artifact 7 天，Pages 網站 artifact 一天。自動恢復仍選最新有效版本，較舊錨點只供人工 explicit 恢復。主動清理保護不能阻止平台到期，ZIP 包內到期亦獨立檢查。過渡：已上傳的 7 天舊包不改期限、不續期；上線後新包才為 15 天，日錨點自上線起逐步累積。
 
 內容版本由 [content_versions.py](../fetchers/src/content_versions.py) 計算，排除 fetched_at／updated_at 等執行欄位與已知自加防快取參數；固定網址／未知時間等圖片另下載 body 算 SHA-256，不保存 body。內容相同時 due 還原舊 JSON bytes，成功檢查時間另存 state。
 
@@ -168,7 +168,7 @@ flowchart TD
 | 提案，待確認 | 首次歷史建檔與補查 | 目前仍共用每輪十二次限制；拆分初查／重試預算未實作，新數值未定。本批只有分類與提示，沒有調整策略。 |
 | 待檢視 | 雷達／衛星保守延遲 | 現行 fallback／探查使用 20／30 分鐘延遲，是程式策略，不是已驗證的官方發布週期。 |
 | 本批新增 | 定時抓取／部署 | workflow 已接每十分鐘 schedule；預設分支推送後啟用，兩次真 schedule 驗收及自然未變／失敗情境分開記錄於本機 HANDOFF。 |
-| 未定案 | 長期保存／歷史清理 | 七天只是測試設定；未實作新的長期政策，不得擅自刪除歷史或續期舊包。 |
+| 已定案（2026-11-10） | 保存期限／歷史清理 | 資料快照 15 天分層保留、狀態 7 天；refresh 只保留台北當日與各產品 latest 所屬日期的 history（`history.keep_past_dates=false`），舊日期檔不再帶入快照與網站；舊包不續期。 |
 
 ## 7. fallback 失敗路徑盤點（2026-11-02 當時紀錄，已納入 5914016）
 
@@ -313,13 +313,13 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 
 [pages-manual.yml](../.github/workflows/pages-manual.yml) 的原手動輸入／publish 預設及整批 `pages-manual` 鎖保留；移除直接 cron。控制器不持有發布鎖、不等待子發布完成；入口與派發前查 queued／in_progress／waiting／pending／requested，有工作時記錄 busy，不追加自動發布，但仍等待並接下一控制器。陳舊未完成 run 也不能因年齡被忽略。
 
-發布流程仍是原可信 artifact 生產者，沒有把 artifact 搬到控制器；[cloud_snapshots.py](../fetchers/src/cloud_snapshots.py)／[artifact_store.py](../fetchers/src/artifact_store.py) 的 workflow 路徑、版本 guard、內容去重、保存讀回、線上 marker、失敗備援與清理規則均未更動。
+發布流程仍是原可信 artifact 生產者，沒有把 artifact 搬到控制器；[cloud_snapshots.py](../fetchers/src/cloud_snapshots.py)／[artifact_store.py](../fetchers/src/artifact_store.py) 的 workflow 路徑、版本 guard、內容去重、保存讀回、線上 marker 與失敗備援在接力批次均未更動；清理規則於 2026-11-10 改為分層保留（見第 4 節保存政策現況）。
 
-保存後讀回（`verify-data`／`verify-state`）於 2026-11-10 加入有界重讀：剛 finalize 的 artifact 讀取若遇 404、尚無 digest、傳輸或 digest 不符等 `ArtifactError`，整段讀回（重取 metadata、可信 run、下載、外 digest）最多再做三次（間隔 3／6／12 秒）。權限錯誤、內容／bytes 與準備資料不符、來源 run 不可信、壞 state 均不重試，立即停止部署。線上 Pages chain #342／#344／#381／#384 皆在 finalize 後約 0.4 秒失敗。CLI 失敗時另印 `Failure reason:`，只顯示固定訊息（例如 `GitHub request failed (HTTP 404)`），其他錯誤只顯示例外型別，不輸出路徑、網址或文件內容。手動發布也不啟動接力。資料及 scheduler state 的保存與有效期限仍是 7 天；控制器不保存資料 artifact、不改 JSON、不建資料分支。
+保存後讀回（`verify-data`／`verify-state`）於 2026-11-10 加入有界重讀：剛 finalize 的 artifact 讀取若遇 404、尚無 digest、傳輸或 digest 不符等 `ArtifactError`，整段讀回（重取 metadata、可信 run、下載、外 digest）最多再做三次（間隔 3／6／12 秒）。權限錯誤、內容／bytes 與準備資料不符、來源 run 不可信、壞 state 均不重試，立即停止部署。線上 Pages chain #342／#344／#381／#384 皆在 finalize 後約 0.4 秒失敗。CLI 失敗時另印 `Failure reason:`，只顯示固定訊息（例如 `GitHub request failed (HTTP 404)`），其他錯誤只顯示例外型別，不輸出路徑、網址或文件內容。手動發布也不啟動接力。資料快照保存與有效期限為 15 天、scheduler state 為 7 天；控制器不保存資料 artifact、不改 JSON、不建資料分支。
 
 ### 識別碼、去重及回應遺失
 
-控制邏輯在 [chain_controller.py](../fetchers/chain_controller.py)。控制器以自身 run ID／attempt 組成 `u<ID>a<attempt>` 呼叫發布，明確帶入 auto＋refresh＋7天；發布的 `run-name` 固定為 `Pages chain <識別碼>`。交棒使用 `r<ID>a<attempt>`，下一控制器名稱為 `Relay <識別碼>`，入口也核對其 parent run ID／attempt／branch／event 及自己的 title，不只印出未查證的父識別字串。Summary 記錄父識別碼、本輪 ID／attempt、更新子 run、busy／停止原因、下一 relay ID 及當時狀態。下一輪尚未結束時只報 queued／觀察中，不宣稱成功。
+控制邏輯在 [chain_controller.py](../fetchers/chain_controller.py)。控制器以自身 run ID／attempt 組成 `u<ID>a<attempt>` 呼叫發布，明確帶入 auto＋refresh＋15天（`RETENTION_DAYS` 常數，測試核對與 policy 相同）；發布的 `run-name` 固定為 `Pages chain <識別碼>`。交棒使用 `r<ID>a<attempt>`，下一控制器名稱為 `Relay <識別碼>`，入口也核對其 parent run ID／attempt／branch／event 及自己的 title，不只印出未查證的父識別字串。Summary 記錄父識別碼、本輪 ID／attempt、更新子 run、busy／停止原因、下一 relay ID 及當時狀態。下一輪尚未結束時只報 queued／觀察中，不宣稱成功。
 
 去重紀錄是 GitHub Actions 的 run metadata（`display_title`、ID、attempt、event、branch、workflow path、created_at），不是公開 JSON，也不是 7 天 scheduler-state artifact。其保留期限取決於 repository Actions 執行紀錄政策，不在本批改動。不得任意刪除仍用於接力查證的執行紀錄。
 

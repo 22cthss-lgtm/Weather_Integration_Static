@@ -15,6 +15,8 @@ RELAY = 'weather-relay.yml'
 PUBLISH = 'pages-manual.yml'
 ACTIVE = ('queued', 'in_progress', 'waiting', 'pending', 'requested')
 INTERVAL = 600
+# Must equal fetchers/policies/due-runtime.json artifact_retention_days (tested).
+RETENTION_DAYS = '15'
 READ_ATTEMPTS = 3
 MAX_BODY = 2 * 1024 * 1024
 # Run listings are eventually consistent: a filtered query may briefly report a
@@ -211,7 +213,7 @@ class Controller:
         self.context()
         match = re.fullmatch(r'u([1-9][0-9]*)a([1-9][0-9]*)', request_id)
         if (not match or self.env.get('SOURCE_MODE') != 'auto' or self.env.get('MODE') != 'refresh'
-                or self.env.get('RETENTION_DAYS') != '7'
+                or self.env.get('RETENTION_DAYS') != RETENTION_DAYS
                 or self.env.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'):
             raise RelayError('invalid_chain_inputs')
         self.enabled()
@@ -287,7 +289,7 @@ class Controller:
                 request_id = 'u' + identifier + 'a' + attempt
                 try:
                     child = self.dispatch(PUBLISH, dict(snapshot_source='auto', mode='refresh',
-                        snapshot_retention_days='7', chain_request_id=request_id),
+                        snapshot_retention_days=RETENTION_DAYS, chain_request_id=request_id),
                         'Pages chain ' + request_id, timestamp(current['created_at']))
                 except Busy as error:
                     self.report('busy', str(error) + '; changed during preflight, no update dispatched')

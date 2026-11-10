@@ -97,14 +97,26 @@ class ControllerTests(unittest.TestCase):
 
     def publisher(self):
         self.env.update(GITHUB_RUN_ID='80', GITHUB_EVENT_NAME='workflow_dispatch',
-                        CHAIN_REQUEST_ID='u10a1', SOURCE_MODE='auto', MODE='refresh', RETENTION_DAYS='7')
+                        CHAIN_REQUEST_ID='u10a1', SOURCE_MODE='auto', MODE='refresh', RETENTION_DAYS='15')
         self.api.rows.append(record(80, chain.PUBLISH, 'Pages chain u10a1', 'in_progress'))
+
+    def test_retention_constant_matches_confirmed_policy(self):
+        import json
+        policy = json.loads((Path(__file__).resolve().parents[1] / 'policies/due-runtime.json').read_text(encoding='utf-8'))
+        self.assertEqual(chain.RETENTION_DAYS, str(policy['artifact_retention_days']))
+        self.assertEqual(policy['artifact_retention_days'], policy['zip_valid_days'])
+
+    def test_old_seven_day_chain_inputs_are_rejected(self):
+        self.publisher()
+        self.env['RETENTION_DAYS'] = '7'
+        with self.assertRaisesRegex(chain.RelayError, 'invalid_chain_inputs'):
+            self.controller.admit()
 
     def test_normal_round_has_explicit_inputs_and_next_parent(self):
         self.controller.relay()
         self.assertEqual(len(self.api.posts), 2)
         self.assertEqual(self.api.posts[0][1], {'ref': 'main', 'inputs': dict(
-            snapshot_source='auto', mode='refresh', snapshot_retention_days='7', chain_request_id='u10a1')})
+            snapshot_source='auto', mode='refresh', snapshot_retention_days='15', chain_request_id='u10a1')})
         self.assertEqual(self.api.posts[1][1]['inputs'], {'relay_request_id': 'r10a1'})
         self.assertEqual(self.elapsed, 600)
         self.assertTrue(any(k == 'next_relay' for k, _ in self.messages))

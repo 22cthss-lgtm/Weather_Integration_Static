@@ -197,7 +197,7 @@ Fetcher 先確認最新有效圖片，再以原 CWAService 時次產生器與網
 | 輸出路徑（相對 frontend/public） | 結構 |
 | --- | --- |
 | data/images/{type}/latest.json | 原七欄位圖片物件 |
-| data/images/{type}/history/YYYY-MM-DD.json | schema_version=2、image_type、date、timezone、updated_at、range_start/end、expected_count、complete、pending[]、missing[]、failed[]、official_missing[]、legacy_unknown[]、items[] |
+| data/images/{type}/history/YYYY-MM-DD.json（2026-11-10 起 refresh 只保留台北當日與 latest 所屬日期） | schema_version=2、image_type、date、timezone、updated_at、range_start/end、expected_count、complete、pending[]、missing[]、failed[]、official_missing[]、legacy_unknown[]、items[] |
 | data/images/rainfall/daily/latest.json | date、timezone、fetched_at、items[]（三張官方單日圖） |
 | data/rainfall/rankings/latest.json | source、dataset_id、fetched_at、rankings（各期間） |
 
@@ -382,7 +382,7 @@ OS 在程序退出或崩潰時自動釋放鎖；檔案保留存在是正常的�
 ## 手動更新並發布
 
 新版支援 auto 選取快照與按圖資到期檢查，使用者確認的配置集中於 policies/。
-資料與狀態分開保存、版本去重與七天期限說明見 [按到期項目更新](../docs/due-refresh.md)。
+資料與狀態分開保存、版本去重、分層保留與期限（資料 15 天、狀態 7 天）說明見 [按到期項目更新](../docs/due-refresh.md)。
 workflow 目前仍只有手動觸發，沒有啟用 schedule。
 
 沿用現有 Pages workflow，以 `refresh` 模式恢復指定有效快照、抓取資料並驗證發布；
