@@ -26,6 +26,8 @@ LISTING_RETRY_DELAYS = (2, 4)
 # After the single dispatch POST, a newly created run can take tens of seconds to
 # appear in filtered listings. Observe for about a minute; never resend the POST.
 RECONCILE_DELAYS = (2, 4, 8, 15, 15, 15)
+# Publisher admission waits for its own run to appear (~29 s; admission job limit 3 min).
+ADMISSION_DELAYS = (2, 4, 8, 15)
 
 
 class RelayError(ValueError):
@@ -227,9 +229,18 @@ class Controller:
                 or parent.get('run_attempt') != int(match[2])):
             raise RelayError('invalid_chain_parent')
         current = int(self.env['GITHUB_RUN_ID'])
-        matches = self.matching(PUBLISH, 'Pages chain ' + request_id, timestamp(parent['created_at']))
-        if not any(row['id'] == current for row in matches):
-            raise RelayError('current_run_not_in_complete_query')
+        # A just-started run can be missing from filtered listings for a while
+        # (Pages chain #550, 2026-11-10). Re-read a bounded number of times.
+        for attempt in range(len(ADMISSION_DELAYS) + 1):
+            matches = self.matching(PUBLISH, 'Pages chain ' + request_id, timestamp(parent['created_at']))
+            if any(row['id'] == current for row in matches):
+                if attempt:
+                    self.report('admission_listing_reads', attempt + 1)
+                break
+            if attempt == len(ADMISSION_DELAYS):
+                raise RelayError('current_run_not_in_complete_query')
+            self.sleep(ADMISSION_DELAYS[attempt])
+            self.enabled()
         if any(row['id'] < current for row in matches):
             raise Stopped('duplicate_chain_request')
         self.enabled()  # Check after metadata queries, immediately before admission/fetch.

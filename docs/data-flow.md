@@ -325,7 +325,7 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 
 每個邏輯派發最多一次 POST。派發前先找同識別碼；找到一份就沿用，找到多份則停止。HTTP 逾時、5xx、回應截斷或其他結果不明時，只做最多七輪完整查證（輪間 2／4／8／15／15／15 秒，約 59 秒），不重新 POST；每輪之間重讀控制器開關，停用即停止。2026-11-10 起由原三輪（約 6 秒）放寬：線上 Relay #27 在 POST 已建立發布 run 後，篩選列表約 6 秒內仍未顯示該 run 而安全停止，導致接力中斷約 3.4 小時。確認不到就報 `dispatch_unconfirmed_no_resend`，交由未來 cron 重新 seed，不能當作派發成功。即使 POST 回成功，也須查到匹配 run 才記錄成功派發。
 
-發布 admission 在原整批鎖內執行：核對 parent workflow／ID／attempt／branch、目前 run 是否出現在完整查詢，已有更早同識別碼 run 則略過 build。自動請求不允許 rerun 重做抓取，需由新控制器產生新識別碼。普通手動輸入不需控制器或 token 即可通過 admission，原發布校驗照常執行。
+發布 admission 在原整批鎖內執行：核對 parent workflow／ID／attempt／branch、目前 run 是否出現在完整查詢，已有更早同識別碼 run 則略過 build。剛啟動的 run 可能暫時不在篩選列表中（線上 Pages chain #550 因此停止），2026-11-10 起最多再讀 4 次（間隔 2／4／8／15 秒，約 29 秒，每次間隔重讀開關），仍查不到才報 `current_run_not_in_complete_query`；遲到出現的較早同識別碼 run 仍判為重複而略過。自動請求不允許 rerun 重做抓取，需由新控制器產生新識別碼。普通手動輸入不需控制器或 token 即可通過 admission，原發布校驗照常執行。
 
 每次列表查詢最多讀 100 份符合條件的 run，total_count 必須等於實際筆數，拒絕超限、重複 ID、錯誤型別與不一致身分；不截斷後猜測。total_count 與筆數暫時不一致（線上 Relay #49 曾因此停止）時，同一查詢最多再讀兩次（間隔 2／4 秒），仍不一致才報 `incomplete_run_query`；超過 100 筆不重讀，直接停止。父 run 遺失則停止。GitHub 刪除的舊執行不會留在清單，不能證明曾經不存在：因此不支援刪紀錄後重播舊識別碼，也沒有另建長期去重帳本。單次 POST 規則避免本控制器因回應遺失而主動產生第二份派發。
 

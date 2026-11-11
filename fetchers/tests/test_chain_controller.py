@@ -281,6 +281,54 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaises(chain.Stopped):
             self.controller.admit()
 
+    def lagging_listing(self, misses, hidden=(80,)):
+        """The first ``misses`` admission listings do not yet show ``hidden`` runs."""
+        original = self.controller.matching
+        calls = []
+        def lagging(*args):
+            calls.append(args)
+            rows = original(*args)
+            return [r for r in rows if r['id'] not in hidden] if len(calls) <= misses else rows
+        self.controller.matching = lagging
+        return calls
+
+    def test_admission_rereads_until_current_run_is_listed(self):
+        # Pages chain #550 (2026-11-10) stopped on the first listing that lacked itself.
+        self.publisher()
+        calls = self.lagging_listing(2)
+        self.assertTrue(self.controller.admit())
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(self.elapsed, sum(chain.ADMISSION_DELAYS[:2]))
+        self.assertIn(('admission_listing_reads', 3), self.messages)
+
+    def test_admission_still_stops_when_current_run_never_appears(self):
+        self.publisher()
+        calls = self.lagging_listing(99)
+        with self.assertRaisesRegex(chain.RelayError, 'current_run_not_in_complete_query'):
+            self.controller.admit()
+        self.assertEqual(len(calls), len(chain.ADMISSION_DELAYS) + 1)
+        self.assertEqual(self.elapsed, sum(chain.ADMISSION_DELAYS))
+        self.assertLess(self.elapsed, 60)
+
+    def test_admission_wait_honours_stop_and_late_duplicates(self):
+        self.publisher()
+        self.lagging_listing(1)
+        original = self.sleep
+        def stop(seconds):
+            original(seconds)
+            self.api.active = False
+        self.controller.sleep = stop
+        with self.assertRaises(chain.Stopped):
+            self.controller.admit()
+        self.api.active = True
+        self.controller.sleep = original
+        # An earlier duplicate that only shows up on a later read still stops admission.
+        self.api.rows.append(record(79, chain.PUBLISH, 'Pages chain u10a1'))
+        calls = self.lagging_listing(1, hidden=(79, 80))
+        with self.assertRaisesRegex(chain.Stopped, 'duplicate'):
+            self.controller.admit()
+        self.assertEqual(len(calls), 2)
+
     def test_disable_during_admission_query_stops_before_fetch(self):
         self.publisher()
         original = self.controller.matching
