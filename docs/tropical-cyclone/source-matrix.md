@@ -95,3 +95,166 @@ CWA <https://opendata.cwa.gov.tw/dataset/warning/W-C0034-005>、<https://opendat
 - JMA 接近日本時的加密發布頻率；JTWC 的 TCFA（WTPN21-26）實際檔名。
 - CWA 官網路徑圖檔名的完整規則；CWA 官網圖片的使用條款。
 - 長時間穩定性（只做了單一時點的實測，未持續觀察）。
+
+---
+
+# 模式來源驗證（S2）
+
+> 實測日期：2026-11-11（約 11:23–11:50 UTC，臺灣時間 19:23–19:50）
+> 實測環境：本機 Windows（Python 3.13 + requests，TLS 驗證開啟，固定 UA，請求間隔 1 秒）。
+> 原始回應、一次性腳本與輸出放在 `.runtime/tc-source-verification/s2/`（`raw/`、`scripts/`、`out/`、`venv/`，不入版控）。
+> 實測時的系統：**CEMPAKA（JTWC 31W）**，正在變性；另有中太平洋的 **PENA（04C）**，預報路徑會越過換日線進入西北太平洋。兩者的真實樣本都已保存。
+> 標記沿用 S1：**[實測]**、**[官方文件]**、**[待驗證]**。
+
+## 5. 模式來源總表
+
+| 欄位 | NOAA NCEP ens_tracker（ATCF） | ECMWF Open Data 熱帶氣旋路徑（BUFR） |
+|---|---|---|
+| 網址與格式 | `https://nomads.ncep.noaa.gov/pub/data/nccf/com/ens_tracker/prod/{system}.{YYYYMMDD}/{HH}/tctrack/{code}.t{HH}z.cyclone.trackatcfunix`；`system` 為 `gfs`、`gefs`、`aigfs`、`aigefs`。純文字 ATCF a-deck 行格式（逗號分隔）[實測]。同層另有 `genesis/` 目錄（未下載內容） | `https://data.ecmwf.int/forecasts/{YYYYMMDD}/{HH}z/{model}/0p25/{stream}/{YYYYMMDDHH}0000-{step}h-{stream}-tf.bufr`；`model/stream` 為 `ifs/oper`、`ifs/enfo`、`aifs-single/oper`、`aifs-ens/enfo`。BUFR edition 4，序列 3 16 082 [實測] |
+| 認證 | 不需要 [實測] | 不需要 [實測] |
+| 可達性 | 本機：200，TLS 驗證正常 [實測]。GitHub Actions：**[待驗證]** | 本機：200，TLS 驗證正常 [實測]。GitHub Actions：**[待驗證]** |
+| 頻率與延遲 | 每日 00／06／12／18Z。檔案時間減 cycle 時刻（主代理 5–6 個 cycle，審查代理重抓 7 個 cycle）：GFS +4.7 至 +4.8h、AIGFS +4.0 至 +4.1h、GEFS +5.5 至 +5.6h、AIGEFS +4.6 至 +5.3h [實測]。樣本少，排程的等待時間應以上緣再加餘裕。只保留兩個日期目錄（當日與前一日）[實測]；每日最後一個 cycle 的實際可取得時間可能只略多於一天，舊目錄的刪除時點 **[待驗證]** | 每日 00／06／12／18Z。檔案時間減 cycle 時刻：IFS 確定性 +6.9h（00／12Z）、+6.2h（06／18Z）；AIFS 確定性 +7.1h（00／12Z）、+6.5h（18Z）；IFS 與 AIFS Ensemble +7.7h（00／12Z）、+7.3h（18Z）[實測，3–6 個 cycle]。保留最近 12 個 run [官方文件；主代理實測最舊可取得為 11/08 06Z，11/08 00Z 回 404，與此一致；審查代理稍後看到 13 個 run 同時存在，清除可能有延遲，程式不要假設恰好 12 個] |
+| 內容 | 每個系統每 6 小時一點：緯度、經度（0.1°）、最大風（kt）、中心氣壓（hPa）、34／50／64 kt 四象限半徑（nm，每個門檻一行）。追蹤器追丟就結束，各成員長度不一。本次看到的最長時效：GFS 192h、GEFS 192h、AIGFS 150h、AIGEFS 240h，會隨 cycle 變動；**各模式的時效上限 [待驗證]** | 每個系統一個 BUFR message，Ensemble 每個成員一個 subset。每 6 小時一步：中心位置、中心氣壓（Pa）、10 m 最大風（m/s）及其位置、18／26／33 m/s 四象限半徑（m）。檔名時效：IFS 00／12Z 為 360h，06／18Z 為 144h [實測＋官方文件]；AIFS 四個 cycle 都是 360h [實測；06Z 由審查代理以 HEAD 確認] |
+| 模式代碼／成員 | GFS：`avno`（另有 `avnop` 加熱力欄位、`avnx`）。GEFS：`ac00`＋`ap01`–`ap30`，另有 `aemn`（平均）。AIGFS：`agfs`（另有 `agfsp`）。AIGEFS：`a000`–`a030`，另有 `a000p`–`a030p` 與 `aimn`（平均）。檔內第 5 欄的代碼是檔名代碼的大寫；但 `p` 檔的第 5 欄不含 `P`（`avnop` 檔內是 `AVNO`），同目錄混讀會與主檔撞代碼 [實測]。`ac00`、`a000` 是否為控制成員 **[待驗證]**（依命名慣例推測是） | IFS Ensemble：成員 1–51；1–50 的 `ensembleForecastType` 為 4，51 為 0。IFS 確定性：成員編號 51、類型 0。AIFS Ensemble：成員 1–52；1–50 為 4，51 為 1，52 為 0。AIFS 確定性：成員編號 52、類型 0 [實測]。官方文件稱 IFS Ensemble 有 50 個擾動成員 [官方文件]；類型代碼的正式意義與 AIFS 第 51、52 號成員的身分 **[待驗證]** |
+| 識別碼 | 前兩欄為盆地與序號，如 `WP, 31`、`CP, 04`、`SI, 03`，**與 JTWC／NHC 編號相同** [實測：WP31、CP04]。檔內沒有名稱 | `stormIdentifier` 如 `38W`、`04C`，`longStormName` 如 `CEMPAKA`、`PENA` [實測]。**CEMPAKA 是 `38W`，不是 JTWC 的 31W**；PENA 的 `04C` 則與 NHC 相同。編號 70 以上（`70W`、`71W`…）的名稱欄與編號相同，分析位置為缺值，看起來是模式自行生成的系統 [實測；70 這個界線的官方定義 **[待驗證]**] |
+| 西北太平洋涵蓋 | 是。全球各盆地在同一個檔案 [實測：WP、CP、SI] | 是。全球各盆地在同一個檔案 [實測] |
+| 無系統時 | 當日尚未發布的 cycle 與未來日期的目錄回 **403**（兩種不同的回應本體）；已過期的日期目錄、以及已發布目錄內不存在的檔名回 404 [實測]。不要依回應本體判斷狀態。全球都沒有系統時檔案是否存在、是否為空檔 **[待驗證]** | cycle 尚未發布回 404 [實測]。官方文件稱 tf 產品「只在有氣旋活動時」產出 [官方文件]。本次每個檔案都含 70 號以上的系統（單檔 5–55 個），所以**檔案存在不代表有已命名系統** [實測]。完全沒有檔案的情況 **[待驗證]** |
+| 圖檔外連 | 不適用 | 不適用 |
+| 授權 | NWS 網頁資訊屬公有領域，可用於任何合法用途；不得宣稱為自己的著作、不得暗示 NOAA／NWS 背書、修改後不得當成官方資料呈現；以其內容為主的著作需依 17 U.S.C. §403 註明含 NWS 資料且不受著作權保護 [官方文件]。NOMADS 首頁未找到明文的請求頻率上限 **[待驗證]** | CC BY 4.0 加 ECMWF 使用條款：需顯著標示來源，並包含指定文字「…based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF)」、著作權聲明、授權聲明、免責聲明，以及是否經過修改；ECMWF 要求時須移除署名 [官方文件]。入口同時連線數限制為 500–2000 [官方文件] |
+| 結論 | **可用**（見 6.1） | **有條件可用**（見 6.2） |
+
+條款出處：
+NOAA <https://www.weather.gov/disclaimer>；
+ECMWF <https://www.ecmwf.int/en/forecasts/datasets/open-data>、<https://apps.ecmwf.int/datasets/licences/general/>、<https://confluence.ecmwf.int/display/DAC/ECMWF+open+data%3A+real-time+forecasts+from+IFS+and+AIFS>。
+擷取的原始頁面在 `.runtime/tc-source-verification/s2/raw/terms/`，轉出的文字在 `s2/out/terms/`。
+
+## 6. 各來源結論與理由
+
+### 6.1 NOAA ATCF tracker — 可用
+
+- **理由**：純文字，不需新套件；四個系統的檔名與代碼規則一致；識別碼就是 JTWC 編號；7 個 cycle 的延遲變動在 0.1–0.7 小時內；資料屬公有領域。
+- **位置核對**：GFS 06Z 的 `WP31` 起始點是 28.8N 149.8E，JTWC 31W 06Z 警報是 29.1N 150.2E，相距約 50 km [實測]。
+- **注意**
+  1. 沒有名稱。名稱可由同一主機的 tcvitals 取得（見 7）。
+  2. 未發布的目錄回 403，過期的回 404；兩者都不能當成「沒有颱風」。
+  3. 只保留兩個日期目錄，不是 48 小時。每日 18Z 的 cycle 約 22–23.5Z 才發布，若前一日目錄在換日前後被刪，可補抓的時間可能只有約 25–30 小時（刪除時點 [待驗證]）。S3 的補抓設計應以「約一天」為準。
+  4. Ensemble 是每個成員一個檔案：GEFS 31 個、AIGEFS 31 個。每個 cycle 兩個 Ensemble 約 62 次請求，S3 要計入請求預算並設定間隔。
+  5. 同一個時效每個風速門檻一行，要合併成一點。
+  6. 檔案含全球系統，要依盆地篩選。**中太平洋的系統可能越過換日線進入西北太平洋，但編號維持 `CP`**（本次 PENA 的預報路徑即是）；只取 `WP` 會漏掉這類系統，S3 需決定如何處理。
+  7. 有現成的平均檔（`aemn`、`aimn`），可評估是否直接取用；但平均檔只有 34 kt 門檻的行，風圈資訊不完整 [實測，審查代理]。
+  8. GitHub Actions 可達性與正式的請求頻率上限 **[待驗證]**。
+
+### 6.2 ECMWF 熱帶氣旋 BUFR — 有條件可用
+
+- **理由**：四個產品都能取得並解碼；授權明確；確定性檔約 9.6–37 KB，Ensemble 檔約 0.3–1.1 MB。
+- **條件**
+  1. **需要 BUFR 解析套件**，會新增相依套件（見 8）。
+  2. **識別碼不能直接對上 JTWC**（38W 對 31W）。本次可用名稱配對；命名前的系統只能用位置配對。ECMWF 00Z 的分析位置是 27.7N 146.6E，GEFS 同時刻的 `WP31` 是 27.7N 146.8E [實測]。配對規則由 S3 決定。
+  3. 要濾掉 70 號以上的系統，否則資料量會大很多（見 9）。
+  4. 已命名系統**不一定每個 cycle 都出現**：PENA 在 11/10 12Z 與 11/11 00Z 的四個檔案中都有，在 11/10 18Z 的四個檔案中都沒有 [實測]。原因 **[待驗證]**；程式不能把單一 cycle 缺少某系統當成它已消散。
+  5. 官方文件的產品表只列出 IFS 的 tf 產品，沒有列出 AIFS 的 tf 產品；AIFS 的檔案是實測存在 [實測]。AIFS tf 是否為正式支援的產品 **[待驗證]**。
+  6. 延遲比 NOAA 長約 2 小時。
+  7. 頁面需依條款放上指定的署名文字與授權聲明。
+  8. GitHub Actions 可達性 **[待驗證]**。
+
+## 7. JTWC a-deck／b-deck（S1 降級方案 (b) 的前提）
+
+| 來源 | 結果 |
+|---|---|
+| `https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/gfs.{YYYYMMDD}/{HH}/atmos/gfs.t{HH}z.syndata.tcvitals.tm00` | 200。內含 `JTWC 31W CEMPAKA 20261111 0600 291N 1502E …` 與 `NHC 04C PENA …`，位置與 JTWC 06Z 警報相同；06Z 檔的時間是 08:41Z [實測]。**同時提供 JTWC 編號、名稱與分析位置** |
+| UCAR RAL TCGP `https://hurricanes.ral.ucar.edu/repository/data/bdecks_open/2026/bwp312026.dat` | 200。最佳路徑分析（`BEST`），最後一筆是 06Z，檔案時間 09:17Z [實測] |
+| UCAR RAL TCGP `…/repository/data/adecks_open/awp312026.dat` | 200，3.4 MB，87 種代碼 [實測]。**沒有 JTWC 官方預報**（第 5 欄沒有 `JTWC`、`WRNG`、`OFCL` 代碼），只有 `CARQ`（分析，行內註明來自 `NCEP_TCVITALS`）和各模式的路徑 |
+| NHC `https://ftp.nhc.noaa.gov/atcf/aid_public/`、`…/atcf/btk/` | 200，但只有 AL、EP、CP，沒有 WP [實測] |
+| NRL `https://www.nrlmry.navy.mil/atcf_web/docs/tracks/2026/` | **403 Access Denied** [實測]，未嘗試繞過 |
+| `www.ssd.noaa.gov` | DNS 解析失敗 [實測] |
+
+- **結論**：降級方案 (b) **只能取得 JTWC 的分析（現在位置與強度），取不到 JTWC 的官方預報路徑**。若 Actions 連不上 JTWC，官方預報路徑只能靠 JMA 與 CWA。
+- UCAR 說明 JTWC 的資料多數不公開，TCGP 是取得許可後才公開散布 JTWC 的即時分析 [官方文件]。我方再利用這份資料的條件 **[待驗證]**，較穩妥的做法是只用 NOAA 主機上的 tcvitals。
+
+## 8. BUFR 解析套件評估
+
+| 項目 | `eccodes`（可另加 `pdbufr`） | `pybufrkit` |
+|---|---|---|
+| 版本 | eccodes 2.50.0；pdbufr 0.16.0 | 0.2.25 |
+| 是否純 Python | 否。Windows 的 wheel 內含 C 函式庫；Linux 的 `eccodes` wheel 不含函式庫，另外相依 `eccodeslib` 的二進位 wheel [實測：wheel 中繼資料] | 是。但只有 sdist，沒有 wheel；必須搭配 `bitstring<4`（實測 3.1.9）。搭配 bitstring 5.0.0 會在解碼時出錯 [實測] |
+| 連帶相依 | numpy、cffi、attrs、findlibs；加 pdbufr 再多 pandas、pint 等 | bitstring、six |
+| 授權 | Apache 2.0 | MIT（bitstring 也是 MIT）|
+| 本機安裝 | eccodes＋pdbufr 共 84 秒，venv 204 MB [實測，Windows，含下載] | 41 秒，venv 33 MB [實測，Windows] |
+| Linux 下載量 | `eccodes` 與相依 wheel 約 17 MB（其中 numpy 16.7 MB），`eccodeslib` 另 9 MB [實測：`pip download` 指定 manylinux／cp313]。`eccodeslib` 是否還有其他相依 **[待驗證]** | sdist 7.3 MB 加 bitstring 0.2 MB [實測] |
+| `ubuntu-latest` 安裝時間 | **[待驗證]** | **[待驗證]** |
+| 解碼真實樣本 | 成功。Ensemble 檔（約 1 MB，48–56 個 message）約 1.6–1.7 秒 [實測] | 成功。同一個檔約 6.5–7 秒 [實測] |
+| 結果一致性 | 兩個套件對 11/11 00Z 四個檔案中 `38W` 的成員編號範圍與第 1 個 subset 的前 6 個緯度值相同 [實測] | 同左 |
+| 注意 | Ensemble 檔是 compressed BUFR，要用 `#n#key` 逐一取值；`extractSubset` 對這個模板會報 Internal error [實測] | 要鎖定 bitstring 版本；套件的維護狀況未查證 |
+
+- **結論**：兩者都能用。**建議 S3 優先評估 `pybufrkit`＋`bitstring<4`**：純 Python、下載量小、不引入 numpy，解碼時間每檔約 7 秒可接受。`eccodes` 作為備案，解碼較快但相依較重。
+- 不建議用 `pdbufr`：它是 `eccodes` 上的包裝，還多帶 pandas。本次沒有用 `pdbufr` 實際解碼。
+- 最終選擇要等 `ubuntu-latest` 的實測安裝時間，屬 S3 之前應補的 [待驗證] 項目。
+
+## 9. 大小估算
+
+**方法**（腳本 `s2/scripts/size_estimate.py`，輸出 `s2/out/size_estimate.txt`）：把真實樣本轉成假設的精簡 JSON（minified），再量位元組數與 gzip -9 後的大小。JSON 形狀只是估算用，正式契約由 S3 決定。
+
+- 形狀：`{"model","cycle","storm","name","members":[{"m":成員,"t":[[時效,緯度,經度,氣壓,風速],…]}]}`
+- 變體 A：每點 5 個數值。變體 B：每點再加 12 個風圈半徑。
+- 沒有中心位置的點不輸出。
+- ECMWF 時效 0 的點取 significance=1 的中心位置，各成員相同；各成員自己的擾動分析位置沒有輸出。
+- 變體 B 的缺值寫法兩個來源不同：ATCF 缺少的門檻補 `0`，BUFR 缺值寫 `null`。兩種來源的 B 每點大小不能直接比較。
+
+**每點大小** [實測]：Ensemble 的變體 A 約 25–28 bytes，變體 B 約 50–66 bytes。確定性檔點數少，固定開銷占比高，每點 28–57 bytes（A，不計只有 1 點的檔案）。
+
+**實測大小（每個系統、每個 cycle）**
+
+| 產品 | 系統 | 成員 | 點數 | A：JSON／gzip | B：JSON／gzip |
+|---|---|---|---|---|---|
+| IFS Ensemble 11/10 12Z | PENA（長路徑） | 51 | 1250 | 31.5 KB／9.0 KB | 65.5 KB／14.8 KB |
+| IFS Ensemble 11/10 12Z | CEMPAKA（消散中） | 51 | 349 | 8.8 KB／2.5 KB | 22.2 KB／7.9 KB |
+| AIFS Ensemble 11/10 12Z | PENA | 52 | 963 | 24.4 KB／6.2 KB | 48.0 KB／7.4 KB |
+| GEFS 11/11 00Z | PENA（`CP04`） | 31 | 650 | 16.5 KB／4.4 KB | 32.4 KB／5.2 KB |
+| AIGEFS 11/11 06Z | PENA（`CP04`） | 31 | 668 | 16.8 KB／4.2 KB | 33.0 KB／4.8 KB |
+| GFS 11/10 00Z | PENA（`CP04`） | 1 | 33 | 0.9 KB／0.4 KB | 1.7 KB／0.5 KB |
+| IFS 確定性 11/10 12Z | PENA | 1 | 13 | 0.4 KB／0.2 KB | 0.7 KB／0.3 KB |
+
+**估計上限**（每個成員都追到最長時效；A 取 26 bytes／點，B 取 65 bytes／點，兩者是樣本的典型值，不是最壞情況）
+
+| 產品 | 成員 × 點數 | A | B |
+|---|---|---|---|
+| IFS Ensemble（360h，61 點） | 51 × 61 = 3111 | 約 81 KB | 約 202 KB |
+| AIFS Ensemble（360h，61 點） | 52 × 61 = 3172 | 約 82 KB | 約 206 KB |
+| GEFS、AIGEFS（假設 240h，41 點；上限 [待驗證]） | 31 × 41 = 1271 | 各約 33 KB | 各約 83 KB |
+| 單一確定性（61 點） | 61 | 約 2 KB | 約 4 KB |
+
+- **每個系統每個 cycle 合計**（四個 Ensemble 加四個確定性）：實測的長路徑系統約 **90 KB（A）／183 KB（B）**；估計上限約 **235 KB（A）／590 KB（B）**。實測的合計取自不同 cycle 的 PENA 樣本。Ensemble 樣本 gzip 後約為原大小的 15–36%。
+- 最壞情況（每點數值都取最長寫法：A 約 28 bytes、B 約 75 bytes）約 255 KB（A）／680 KB（B）[審查代理估算]，量級相同。
+- 對照：現有快照整份約 15 KB（引自 plan 2.8，本次未重量）。**單一系統單一 cycle 的合計是它的 6 倍（實測 A）到 12 倍（實測 B）；估計上限是 16 倍（A）到 39 倍（B）**。多個系統加多個 cycle 會再倍增。S3 必須決定 Ensemble 是否進快照、保留幾個 cycle、是否只保留變體 A。
+- 70 號以上的系統若不濾掉：單一 Ensemble 檔的這類路徑合計約 137–339 KB（A）[實測]。
+- **限制**：樣本只有兩個系統、三個 cycle。CEMPAKA 正在消散，路徑很短；PENA 的 IFS Ensemble 點數是估計上限的 40%。生命期長的強颱可能更接近上限。
+
+## 10. 尚未驗證（S2 結束時）
+
+- NOAA NOMADS、ECMWF、UCAR 從 **GitHub Actions** 的可達性（S1 三個官方來源也還沒測）。需推送臨時 workflow，尚未取得同意。
+- BUFR 套件在 `ubuntu-latest` 的實際安裝時間；`eccodeslib` 的完整相依。
+- 全球都沒有系統時，ATCF 檔與 ECMWF tf 檔的實際狀況。
+- 各 NOAA 模式追蹤器的時效上限；`ac00`、`a000` 是否為控制成員。
+- ECMWF `ensembleForecastType` 代碼的正式意義、AIFS 第 51／52 號成員的身分、70 號界線的官方定義、AIFS tf 是否為正式產品。
+- NOMADS 舊日期目錄的實際刪除時點（需跨日觀察）；兩種 403 回應本體各在什麼情況出現。
+- PENA 在 18Z 檔案中缺席的原因。
+- NOMADS 的正式請求頻率上限。Pillar 的 `noaa_atcf.py` 模組說明提到每分鐘約 120 次，這不是官方來源，未採信。
+- UCAR TCGP 資料的再利用條件。
+- `genesis/` 目錄的內容與用途。
+- 長時間穩定性（只做了單日實測）。
+
+### S2 驗證分工
+
+- **主代理**（11/11 約 11:23–11:50Z）：第 5–9 節所有 [實測] 項目，除另外註明「審查代理」者。
+- **獨立 Sub-Agent**（11/11 約 17:59–18:02Z 發出請求，共 61 次；腳本與下載檔在 `s2/audit/`）
+  - **獨立重抓並確認**：ATCF 目錄與檔名規則、四個系統的代碼與成員數（7 個 cycle）、延遲、`WP31` 對 JTWC 31W（約 51 km）、403／404 行為、tcvitals 內容、UCAR a-deck 沒有 JTWC 官方預報。
+  - **獨立重算並確認**：用自己寫的 ATCF 解析與 pybufrkit 逐描述符走訪，重算 ATCF 全部 5 組樣本與 11/10 12Z 的 4 個 BUFR 檔，位元組數與主代理完全相同；估計上限的乘法與合計也相同。BUFR 重算用的是主代理下載的檔案。
+  - **部分抽查**：ECMWF 的 `38W`、成員編號與類型（用主代理下載的 11/10 12Z 四個檔）；06Z 檔名時效與 13 個 run（自己的 HEAD 請求）。
+  - **提出**：2 項建議修正（保留期的可補抓時間、延遲範圍）與 10 項輕微問題，本文已全部納入。修正後已交回複查一次（只重讀文件，未再發請求），12 項均確認已處理。
+  - **沒有驗證**：第 8 節套件評估全部；條款與授權敘述；NHC、NRL、`ssd.noaa.gov`、UCAR b-deck 的重新請求；11/10 18Z 與 11/11 00Z 的 BUFR 大小列；「PENA 在 18Z 缺席」；ECMWF 00Z 的分析位置。這些只有主代理的結果。另有三項只看了主代理的檔案、沒有獨立重抓：PENA 越過換日線後仍是 `CP`、GEFS 00Z 的 `WP31` 位置、UCAR b-deck 最後一筆。
+
+## 11. 向 Pillar 借用的概念（只讀，未複製程式碼、未執行）
+
+- `noaa_atcf.py`：`_dir_url`、`_file_name`（目錄與檔名規則的線索）、`parse_atcf`（a-deck 欄位位置與「同一時效多行」的處理）、`latest_cycle`（未發布目錄回 403 的提示）。
+- `ecmwf_bufr.py`：`_url`、`forecast_range_hours`（檔名與 IFS／AIFS 時效差異的線索）、`_decode`（compressed 模板的讀法提示）、`_match_track_ids`（ECMWF 編號不可信、改用位置配對的想法）。
+- 以上都只當作待查線索，本文件的結論全部來自自行實測或官方文件。
