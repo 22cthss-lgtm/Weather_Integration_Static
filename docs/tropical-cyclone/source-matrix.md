@@ -90,6 +90,8 @@ CWA <https://opendata.cwa.gov.tw/dataset/warning/W-C0034-005>、<https://opendat
 
 ## 4. 尚未驗證（S1 結束時）
 
+> 2026-11-12 更新：三個來源從 GitHub Actions 的可達性已補測，都是 200，見 10a。第 1、2 節中的「GitHub Actions：[待驗證]」以 10a 為準。
+
 - 三個來源從 **GitHub Actions** 的可達性。需推送臨時 workflow，尚未取得同意，也沒有執行。
 - JMA 與 CWA 在**無活躍系統時**的實際回應。目前有活躍系統，無法觀察。
 - JMA 接近日本時的加密發布頻率；JTWC 的 TCFA（WTPN21-26）實際檔名。
@@ -149,7 +151,7 @@ ECMWF <https://www.ecmwf.int/en/forecasts/datasets/open-data>、<https://apps.ec
 - **理由**：四個產品都能取得並解碼；授權明確；確定性檔約 9.6–37 KB，Ensemble 檔約 0.3–1.1 MB。
 - **條件**
   1. **需要 BUFR 解析套件**，會新增相依套件（見 8）。
-  2. **識別碼不能直接對上 JTWC**（38W 對 31W）。本次可用名稱配對；命名前的系統只能用位置配對。ECMWF 00Z 的分析位置是 27.7N 146.6E，GEFS 同時刻的 `WP31` 是 27.7N 146.8E [實測]。配對規則由 S3 決定。
+  2. **識別碼不能直接對上 JTWC**（38W 對 31W），而且同一系統的編號會跨 cycle 改變（11/11 12Z 起變成 31W，見 10a）。本次可用名稱配對；命名前的系統只能用位置配對。ECMWF 00Z 的分析位置是 27.7N 146.6E，GEFS 同時刻的 `WP31` 是 27.7N 146.8E [實測]。配對規則由 S3 決定。
   3. 要濾掉 70 號以上的系統，否則資料量會大很多（見 9）。
   4. 已命名系統**不一定每個 cycle 都出現**：PENA 在 11/10 12Z 與 11/11 00Z 的四個檔案中都有，在 11/10 18Z 的四個檔案中都沒有 [實測]。原因 **[待驗證]**；程式不能把單一 cycle 缺少某系統當成它已消散。
   5. 官方文件的產品表只列出 IFS 的 tf 產品，沒有列出 AIFS 的 tf 產品；AIFS 的檔案是實測存在 [實測]。AIFS tf 是否為正式支援的產品 **[待驗證]**。
@@ -188,7 +190,7 @@ ECMWF <https://www.ecmwf.int/en/forecasts/datasets/open-data>、<https://apps.ec
 
 - **結論**：兩者都能用。**建議 S3 優先評估 `pybufrkit`＋`bitstring<4`**：純 Python、下載量小、不引入 numpy，解碼時間每檔約 7 秒可接受。`eccodes` 作為備案，解碼較快但相依較重。
 - 不建議用 `pdbufr`：它是 `eccodes` 上的包裝，還多帶 pandas。本次沒有用 `pdbufr` 實際解碼。
-- 最終選擇要等 `ubuntu-latest` 的實測安裝時間，屬 S3 之前應補的 [待驗證] 項目。
+- `ubuntu-latest` 的實測安裝時間已補（見 10a）：兩者都只要 4–5 秒，結論不變。
 
 ## 9. 大小估算
 
@@ -231,8 +233,7 @@ ECMWF <https://www.ecmwf.int/en/forecasts/datasets/open-data>、<https://apps.ec
 
 ## 10. 尚未驗證（S2 結束時）
 
-- NOAA NOMADS、ECMWF、UCAR 從 **GitHub Actions** 的可達性（S1 三個官方來源也還沒測）。需推送臨時 workflow，尚未取得同意。
-- BUFR 套件在 `ubuntu-latest` 的實際安裝時間；`eccodeslib` 的完整相依。
+- ~~各來源從 GitHub Actions 的可達性、BUFR 套件在 `ubuntu-latest` 的安裝時間~~：已於 11/12 補測，見 10a。仍未驗證的是：NOMADS 目錄清單在 Actions 上失敗的原因、JTWC 個別系統產品從 Actions 的可達性、Ensemble 檔在 Actions 上的解碼時間、長期穩定性。本節以上各表中的「GitHub Actions：[待驗證]」以 10a 為準。
 - 全球都沒有系統時，ATCF 檔與 ECMWF tf 檔的實際狀況。
 - 各 NOAA 模式追蹤器的時效上限；`ac00`、`a000` 是否為控制成員。
 - ECMWF `ensembleForecastType` 代碼的正式意義、AIFS 第 51／52 號成員的身分、70 號界線的官方定義、AIFS tf 是否為正式產品。
@@ -242,6 +243,57 @@ ECMWF <https://www.ecmwf.int/en/forecasts/datasets/open-data>、<https://apps.ec
 - UCAR TCGP 資料的再利用條件。
 - `genesis/` 目錄的內容與用途。
 - 長時間穩定性（只做了單日實測）。
+
+## 10a. GitHub Actions 實測（2026-11-12 10:18Z，S2 補測）
+
+> 方式：經使用者同意，推送一支臨時 workflow 到 `feature/tropical-cyclone`（`bba4a17`），由 push 觸發執行一次（run 43199226792，`ubuntu-latest`，Python 3.13.18），隨即刪除（`50618f4`）。每個網址用 curl 請求一次，固定 UA，不重試，只記錄狀態碼、位元組數、耗時。
+> 結果由使用者從執行摘要頁貼回；主代理無法登入讀取 log，**沒有獨立 Sub-Agent 複核**。草稿保存在 `.runtime/tc-source-verification/s2/actions-draft/`。
+> 這是**單次**測試，只能證明當下可達，不能保證長期穩定。
+
+### 可達性 [實測，Actions]
+
+| 來源 | 結果 |
+|---|---|
+| JTWC | RSS、`abpwweb.txt`、`abpwsair.jpg` 都是 200 |
+| JMA | `extra.xml`、`targetTc.json` 都是 200 |
+| CWA W-C0034-005 | 不帶金鑰 401，帶金鑰 200（11,347 bytes）|
+| NOAA NOMADS 檔案 | `avno`、`ac00`、`agfs`、`a000`、tcvitals 都是 200（11/12 00Z）|
+| NOAA NOMADS **目錄清單** | `ens_tracker/prod/` 與 `gfs…/tctrack/` 兩個目錄頁都失敗，curl 結束碼 16（HTTP/2 層錯誤），沒有取得 HTTP 狀態碼 |
+| ECMWF | 四個 tf 產品都是 200（11/12 00Z）|
+| UCAR | `bdecks_open/` 目錄 200 |
+
+- **結論**：五個來源的資料檔從 GitHub Actions 都連得上。**S1 的 JTWC 降級方案目前不需要啟用**，但設計上仍應允許 JTWC 缺席（單次測試不保證長期）。
+- **NOMADS 目錄清單不可依賴**：同一次執行中檔案請求全部成功，只有目錄頁失敗。原因未查明；改用 HTTP/1.1（例如 Python requests）是否成功 **[待驗證]**。正式程式應**直接以已知檔名請求檔案**，不要先列目錄。GEFS 與 AIGEFS 的成員檔名是固定的，可以這樣做。
+- JTWC 的個別系統產品（`.tcw` 等）這次沒有測，因為需要先解析 RSS 取得當前系統；只測了 RSS 與展望產品。
+
+### BUFR 套件 [實測，Actions]
+
+| 項目 | 現有 `fetchers/requirements.txt`（基準）| `pybufrkit`＋`bitstring<4` | `eccodes` |
+|---|---|---|---|
+| 安裝時間（`--no-cache-dir`）| 1.1 秒 | 4.0 秒 | 4.6 秒 |
+| venv 大小 | 未量 | 30 MB | 391 MB |
+| 安裝的套件 | — | pybufrkit 0.2.25、bitstring 3.1.9、six | eccodes 2.50.1、eccodeslib、**eckitlib**、numpy、cffi、attrs、findlibs、pycparser |
+| 解碼 IFS 確定性檔（17.7 KB，8 個 message）| — | 成功，0.16 秒 | 成功，0.36 秒（含載入函式庫）|
+
+- 兩者在 Linux 上都能用 pip 直接安裝，不需要 apt。安裝時間都只有幾秒，**不會拖慢排程**。
+- 兩者解出的 8 個識別碼完全相同。
+- `eccodes` 在 Linux 佔 391 MB（多了 `eckitlib`，第 8 節未列出），`pybufrkit` 只有 30 MB。
+- **建議維持第 8 節的結論**：優先用 `pybufrkit`＋`bitstring<4`。Ensemble 檔的解碼時間這次沒有在 Actions 上量（本機約 7 秒）。
+
+### 新發現：ECMWF 的識別碼會跨 cycle 改變 [實測]
+
+Actions 解出的識別碼是 `31W`，不是先前的 `38W`。主代理於 11/12 補抓 IFS 確定性檔核對：
+
+| cycle | CEMPAKA 的 `stormIdentifier` | 分析位置 |
+|---|---|---|
+| 11/10 12Z – 11/11 06Z | `38W` | — |
+| 11/11 12Z | `31W` | 30.2N 154.1E |
+| 11/11 18Z | `31W` | 30.9N 156.0E |
+| 11/12 00Z | `31W` | 30.9N 156.0E（與 18Z 相同，沒有預報步）|
+
+- **同一個系統的 ECMWF 編號不穩定**：名稱（`CEMPAKA`）沒變，編號從 `38W` 變成與 JTWC 相同的 `31W`。配對不能用 ECMWF 編號當鍵，也不能假設它等於或不等於 JTWC 編號。已命名系統用名稱加年份；命名前用位置。
+- 11/12 00Z 的分析位置與前一個 cycle 完全相同且沒有預報步，看起來是系統消散後殘留的舊分析 **[推測，待驗證]**。程式要檢查分析時間與預報步數，不能只看系統是否出現在檔案裡。
+- PENA 在 11/11 06Z 與 18Z 的檔案中都有出現，所以先前「11/10 18Z 缺席」不是 06／18Z 的固定規律，原因仍不明。
 
 ### S2 驗證分工
 

@@ -157,7 +157,7 @@
 |---|---|---|---|---|---|
 | S0 | 收尾與解禁 | 否 | 完成 | 2026-11-11 | 限制已解除並記入 HANDOFF；Pillar 無 LICENSE（僅參考概念，不複製程式碼）；分支 `feature/tropical-cyclone`（自 271ac2a）；本檔移至此處，舊筆記存 `archive/`；23 個本機公開 JSON 維持不提交 |
 | S1 | 官方來源驗證 | 否 | 完成 | 2026-11-11 | 產出 `source-matrix.md`：CWA 可用；JTWC、JMA 有條件可用。實測時有活躍系統 CEMPAKA（JTWC 31W／JMA TC2638），已保存真實樣本到 `.runtime`。三個來源從 GitHub Actions 的可達性及無系統時的回應仍為 [待驗證]。獨立 Sub-Agent 已重測 JTWC 與 JMA |
-| S2 | 模式來源驗證 | 否 | 完成 | 2026-11-11 | `source-matrix.md` 第 5–11 節：NOAA ATCF tracker 可用（識別碼即 JTWC 編號，如 `WP31`）；ECMWF BUFR 有條件可用（需 BUFR 套件；識別碼對不上 JTWC，CEMPAKA 為 `38W`，要用名稱或位置配對）。JTWC 降級方案 (b) 只能取得分析，取不到官方預報。BUFR 套件建議優先評估 `pybufrkit`＋`bitstring<4`。每系統每 cycle 的 JSON 實測約 90 KB、估計上限約 235–590 KB。真實樣本存於 `.runtime/tc-source-verification/s2/`。GitHub Actions 可達性與 `ubuntu-latest` 安裝時間仍為 [待驗證]。獨立 Sub-Agent 已重抓 ATCF 並重算大小 |
+| S2 | 模式來源驗證 | 否 | 完成 | 2026-11-11 | `source-matrix.md` 第 5–11 節：NOAA ATCF tracker 可用（識別碼即 JTWC 編號，如 `WP31`）；ECMWF BUFR 有條件可用（需 BUFR 套件；識別碼對不上 JTWC，CEMPAKA 為 `38W`，要用名稱或位置配對）。JTWC 降級方案 (b) 只能取得分析，取不到官方預報。BUFR 套件建議優先評估 `pybufrkit`＋`bitstring<4`。每系統每 cycle 的 JSON 實測約 90 KB、估計上限約 235–590 KB。真實樣本存於 `.runtime/tc-source-verification/s2/`。獨立 Sub-Agent 已重抓 ATCF 並重算大小。11/12 以臨時 workflow 補測（已刪除）：五個來源的資料檔從 GitHub Actions 都是 200，兩個 BUFR 套件安裝各約 4–5 秒；NOMADS 目錄清單在 Actions 上失敗，應直接以檔名請求；ECMWF 對同一系統的編號會跨 cycle 改變（38W→31W）|
 | S3 | 資料契約與設計決策 | 否 | 未開始 | | |
 | S4 | 後端：活躍系統索引 | 是 | 未開始 | | |
 | S5 | 前端：總覽頁 | 是 | 未開始 | | |
