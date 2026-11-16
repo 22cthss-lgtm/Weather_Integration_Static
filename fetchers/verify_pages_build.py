@@ -6,6 +6,9 @@ from pathlib import Path
 from src.snapshots import read_resources, IMAGE_TYPES
 from src.pages_package import site_summary
 
+# Fixed client routes outside /images/ (design.md 7.1); must match frontend/scripts/pages-build.mjs.
+APP_ROUTES = ('tropical',)
+
 
 def verify_build(public_data, output, base, manifest_path):
     if not base.startswith('/') or not base.endswith('/') or '..' in base or '//' in base:
@@ -24,9 +27,14 @@ def verify_build(public_data, output, base, manifest_path):
     for kind in IMAGE_TYPES:
         if (output / 'images' / kind / 'index.html').read_bytes() != html:
             raise ValueError('A static detail entry is missing or inconsistent')
+    for route in APP_ROUTES:
+        entry = output / route / 'index.html'
+        if not entry.is_file() or entry.read_bytes() != html:
+            raise ValueError('A static app entry is missing or inconsistent')
     if not (output / 'Hero_Section_Image.jpeg').is_file():
         raise ValueError('Hero asset is missing')
     return {'verified_json_files': len(after), 'detail_entries': len(IMAGE_TYPES),
+            'app_entries': list(APP_ROUTES),
             'data_sha256': {name: hashlib.sha256(content).hexdigest() for name, content in after.items()}}
 
 

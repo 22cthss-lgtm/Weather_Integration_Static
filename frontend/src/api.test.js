@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { afterEach, expect, test, vi } from "vitest";
-import { fetchDailyImages, fetchImageHistory, fetchLatestImage, fetchRainfallTop } from "./api";
+import {
+  fetchDailyImages, fetchImageHistory, fetchLatestImage, fetchRainfallTop, fetchTropicalOfficialIndex,
+} from "./api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -52,4 +54,26 @@ test("other products retain their API URL", async () => {
   vi.stubGlobal("fetch", request);
   await fetchLatestImage("unsupported_product");
   expect(request).toHaveBeenCalledExactlyOnceWith("http://127.0.0.1:5174/api/images/latest?type=unsupported_product");
+});
+
+test.each(["/", "/weather-static/"])("tropical index reads static JSON under base %s", async base => {
+  vi.stubEnv("BASE_URL", base);
+  const payload = { schema_version: 1 };
+  const request = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload)));
+  vi.stubGlobal("fetch", request);
+  const controller = new AbortController();
+  expect(await fetchTropicalOfficialIndex({ signal: controller.signal })).toEqual(payload);
+  expect(request).toHaveBeenCalledExactlyOnceWith(`${base}data/tropical/official/index.json`,
+    { cache: "no-cache", signal: controller.signal });
+});
+
+test.each([
+  ["404", () => Promise.resolve(new Response("", { status: 404 }))],
+  ["network error", () => Promise.reject(new TypeError("Failed to fetch"))],
+  ["broken JSON", () => Promise.resolve(new Response("{not json"))],
+])("tropical index rejects on %s without falling back to Flask", async (_, response) => {
+  const request = vi.fn(response);
+  vi.stubGlobal("fetch", request);
+  await expect(fetchTropicalOfficialIndex()).rejects.toThrow();
+  expect(request).toHaveBeenCalledExactlyOnceWith("/data/tropical/official/index.json", { cache: "no-cache" });
 });

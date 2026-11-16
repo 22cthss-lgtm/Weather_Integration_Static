@@ -151,6 +151,11 @@ export default function DashboardPage() {
                 );
               })}
             </div>
+            {section.id === "ocean-and-typhoon-potential" ? (
+              <p className="dashboard-section-link">
+                <Link to="/tropical">熱帶系統專區（西北太平洋）→</Link>
+              </p>
+            ) : null}
           </section>
         ))}
       </div>

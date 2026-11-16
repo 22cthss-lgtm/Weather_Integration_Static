@@ -1,0 +1,202 @@
+/* Tropical overview only; loaded with the lazy /tropical chunk. */
+.tc-page {
+  display: grid;
+  gap: 20px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.tc-page h2,
+.tc-page h3,
+.tc-page h4,
+.tc-page h5 {
+  margin: 0;
+}
+
+.tc-banner {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #d4dcec;
+  background: #fff;
+}
+
+.tc-banner p,
+.tc-banner ul {
+  margin: 0;
+}
+
+.tc-banner-ok {
+  border-color: #b9e3c8;
+  background: #effaf3;
+}
+
+.tc-banner-partial,
+.tc-banner-notice {
+  border-color: #f1d49a;
+  background: #fff8e8;
+}
+
+.tc-banner-stale,
+.tc-banner-unavailable {
+  border-color: #f2b8a6;
+  background: #fff1ec;
+}
+
+.tc-stale-list {
+  padding-left: 20px;
+}
+
+.tc-section {
+  display: grid;
+  gap: 14px;
+}
+
+.tc-storm {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #d4dcec;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.06);
+  scroll-margin-top: 16px;
+}
+
+.tc-storm-selected {
+  border-color: #0f6bdc;
+  box-shadow: 0 0 0 3px rgba(15, 107, 220, 0.22);
+}
+
+.tc-storm-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0; /* the site-wide header rule adds a bottom margin */
+}
+
+.tc-name-zh {
+  margin-left: 8px;
+  font-weight: 500;
+  color: #4f5d78;
+}
+
+.tc-hint {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #eef4ff;
+  color: #2858a7;
+}
+
+.tc-ids {
+  margin: 0;
+  color: #4f5d78;
+  overflow-wrap: anywhere;
+}
+
+.tc-agency-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.tc-agency {
+  padding: 10px 12px;
+  border: 1px solid #e3e9f5;
+  border-radius: 12px;
+  background: #f9fbfe;
+}
+
+.tc-agency dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  margin: 8px 0 0;
+}
+
+.tc-agency dt {
+  color: #4f5d78;
+}
+
+.tc-agency dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tc-time {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.tc-time span {
+  white-space: nowrap;
+}
+
+.tc-time span + span {
+  color: #4f5d78;
+  font-size: 0.9em;
+}
+
+.tc-source-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tc-source {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #e3e9f5;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.tc-source-name {
+  font-weight: 700;
+}
+
+.tc-required {
+  margin-left: 8px;
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: #4f5d78;
+}
+
+.tc-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #ffe7df;
+  color: #a13b1f;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.tc-attribution {
+  padding-top: 12px;
+  border-top: 1px solid #d4dcec;
+  color: #4f5d78;
+  font-size: 0.9rem;
+}
+
+.tc-attribution ul {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.tc-attribution a {
+  color: #2858a7;
+  text-decoration: underline;
+}

@@ -18,14 +18,27 @@ export async function buildPages({ root = fileURLToPath(new URL('../', import.me
   base = normalizeBase(base);
   await build({ root, configFile: path.join(root, 'vite.config.js'), base,
     build: { outDir, emptyOutDir: true } });
+  const routes = await writeStaticEntries(outDir);
+  await fs.writeFile(path.join(outDir, '.nojekyll'), '');
+  console.log(`Pages: base=${base}; ${imageTypes.length} real detail entry points; `
+    + `app routes: ${appRoutes.join(', ')}`);
+  return routes;
+}
+
+// Fixed client routes outside /images/ that need their own static entry (design.md 7.1).
+// Individual storms use query parameters on /tropical, so one entry is enough.
+export const appRoutes = ['tropical'];
+
+/** Copy the built index.html to every image detail route and every fixed app route. */
+export async function writeStaticEntries(outDir) {
   const entry = await fs.readFile(path.join(outDir, 'index.html'));
-  for (const type of imageTypes) {
-    const directory = path.join(outDir, 'images', type);
+  const routes = [...imageTypes.map(type => path.join('images', type)), ...appRoutes];
+  for (const route of routes) {
+    const directory = path.join(outDir, route);
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(path.join(directory, 'index.html'), entry);
   }
-  await fs.writeFile(path.join(outDir, '.nojekyll'), '');
-  console.log(`Pages: base=${base}; ${imageTypes.length} real detail entry points`);
+  return routes;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

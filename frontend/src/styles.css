@@ -142,6 +142,19 @@ nav a {
   scroll-margin-top: 24px;
 }
 
+.dashboard-section-link {
+  margin: 0;
+  text-align: center;
+}
+
+.dashboard-section-link a {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: #e6edf9;
+  font-weight: 600;
+}
+
 .back-to-top-button {
   position: fixed;
   right: 24px;

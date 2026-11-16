@@ -4,10 +4,21 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5174
 const STATIC_IMAGE_TYPES = new Set(imageTypes);
 const CURRENT_IMAGE_TYPES = new Set(["radar", "satellite", "rainfall"]);
 
-async function readStatic(path) {
-  const response = await fetch(`${import.meta.env.BASE_URL}${path}`, { cache: "no-cache" });
+async function readStatic(path, { signal } = {}) {
+  const response = await fetch(`${import.meta.env.BASE_URL}${path}`, {
+    cache: "no-cache",
+    ...(signal ? { signal } : {}),
+  });
   if (!response.ok) throw new Error(`無法讀取已發布資料：${path}`);
   return response.json();
+}
+
+// Tropical overview index (design.md 1.3, 4.3, 7.4). The caller checks its shape;
+// any failure here or there is shown as UNAVAILABLE, never as "no storms".
+export const TROPICAL_OFFICIAL_INDEX_PATH = "data/tropical/official/index.json";
+
+export function fetchTropicalOfficialIndex({ signal } = {}) {
+  return readStatic(TROPICAL_OFFICIAL_INDEX_PATH, { signal });
 }
 
 export async function fetchCurrentImageHistory(type, date) {

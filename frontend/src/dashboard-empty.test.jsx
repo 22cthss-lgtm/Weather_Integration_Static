@@ -45,3 +45,14 @@ test("one missing card does not hide successful cards or navigation", async () =
   fireEvent.click(screen.getByRole("button", { name: "Back to top" }));
   expect(scroll).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
 });
+
+test("Ocean and Typhoon Potential links to the tropical overview without extra cards", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+  const { container } = render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+  await screen.findAllByText("目前無有效資料，請稍後重新整理。");
+  const section = container.querySelector("#ocean-and-typhoon-potential");
+  expect(within(section).getByRole("link", { name: /熱帶系統專區/ }).getAttribute("href")).toBe("/tropical");
+  expect(section.querySelectorAll(".grid > .card")).toHaveLength(4);
+  expect(container.querySelectorAll(".dashboard-section-link")).toHaveLength(1);
+  expect(fetch.mock.calls.some(([url]) => url.includes("tropical"))).toBe(false);
+});
