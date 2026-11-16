@@ -18,9 +18,12 @@ class SchedulingTests(unittest.TestCase):
             rainfall_rankings=600, temperature=3600, sst=86400,
             weather_chart=21600, **{'850hpa':21600}, tchp=86400,
             cimss_wind_analysis=10800, cimss_steering_flow=10800,
-            seaice_arctic=86400, seaice_antarctic=86400)
+            seaice_arctic=86400, seaice_antarctic=86400,
+            tropical_official=1800)
         config = s.default_tasks()
         self.assertEqual({k:v['interval_seconds'] for k,v in config.items()}, expected)
+        # Tropical tasks run after the 13 image tasks (design.md 5.1).
+        self.assertEqual(list(config), list(expected))
         self.assertEqual(json.loads((Path(__file__).parents[1] / 'policies/due-intervals.json').read_text())['tasks'], config)
 
     def test_new_state_is_all_due_and_success_uses_check_time(self):

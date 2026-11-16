@@ -139,6 +139,16 @@
         14400,
         21600
       ]
+    },
+    "tropical_official": {
+      "mode": "interval",
+      "interval_seconds": 1800,
+      "retry_delays_seconds": [
+        600,
+        1200,
+        2400,
+        3600
+      ]
     }
   }
 }

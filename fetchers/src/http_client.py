@@ -25,7 +25,7 @@ def source_name(url):
     for source, suffixes in {
         'cwa': ('cwa.gov.tw',), 'jma': ('jma.go.jp',),
         'kma': ('kma.go.kr', 'weather.go.kr'), 'cimss': ('wisc.edu',),
-        'nsidc': ('nsidc.org',),
+        'nsidc': ('nsidc.org',), 'jtwc': ('metoc.navy.mil',),
     }.items():
         if any(host == suffix or host.endswith('.' + suffix) for suffix in suffixes):
             return source
@@ -159,8 +159,10 @@ _policy = ContextVar('weather_http_policy', default=None)
 
 
 @contextmanager
-def http_scope():
-    token = _policy.set(HttpPolicy())
+def http_scope(policy=None):
+    """Scopes nest: an inner scope has its own budgets and never reads or
+    changes the outer one. ``policy`` lets tests inject waits and clocks."""
+    token = _policy.set(policy or HttpPolicy())
     try:
         yield
     finally:

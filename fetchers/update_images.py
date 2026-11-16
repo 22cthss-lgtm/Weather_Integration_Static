@@ -12,6 +12,7 @@ from src.services.kma_service import KMAService
 from src.services.ocean_service import OceanService
 from src.current_day import CURRENT_PRODUCTS, update_current_product
 from src.rainfall_rankings import update_rankings
+from src.tropical_official import update_tropical_official
 from src.update_runner import UpdateInProgress, run_batch
 
 
@@ -31,8 +32,17 @@ GROUP_PRODUCTS = {
     'seaice_antarctic': (NSIDCService, 'fetch_antarctic'),
 }
 
+# Tropical cyclone tasks write JSON under <data>/tropical/, next to images/.
+# They are deliberately absent from registered_products(): they are not image
+# products and only run when named explicitly or scheduled as a due task.
+TROPICAL_TASKS = {
+    'tropical_official': update_tropical_official,
+}
+
 
 def update_image(image_type, output_root=OUTPUT_ROOT):
+    if image_type in TROPICAL_TASKS:
+        return TROPICAL_TASKS[image_type](Path(output_root).parent)
     if image_type in CURRENT_PRODUCTS:
         return update_current_product(image_type, output_root)
     if image_type == 'rainfall_rankings':
@@ -63,7 +73,7 @@ def main(argv=None):
     parser.add_argument('--output-root', type=Path, default=OUTPUT_ROOT)
     args = parser.parse_args(argv)
     registered = registered_products()
-    unknown = set(args.types) - registered.keys()
+    unknown = set(args.types) - registered.keys() - TROPICAL_TASKS.keys()
     if unknown:
         parser.error(f'Unknown products: {", ".join(sorted(unknown))}')
     try:

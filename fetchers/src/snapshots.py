@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from .publication import GROUPS, validate_image, atomic_write_json
 from .rainfall_rankings import METRICS
+from .tropical_contract import OFFICIAL_INDEX_PATH, validate_official_index
 
 IMAGE_TYPES = ('sst', 'temperature', 'weather_chart', '850hpa', 'tchp',
                *GROUPS, 'radar', 'satellite', 'rainfall')
@@ -23,7 +24,8 @@ IMAGE_FIELDS = {'image_type', 'source', 'title', 'image_url', 'source_url', 'ima
 
 
 def allowed_path(name):
-    return name in REQUIRED or bool(re.fullmatch(
+    # Tropical cyclone resources are allowed but never required (design.md 4.1).
+    return name in REQUIRED or name == OFFICIAL_INDEX_PATH or bool(re.fullmatch(
         r'images/(radar|satellite|rainfall)/history/\d{4}-\d{2}-\d{2}\.json', name))
 
 
@@ -182,6 +184,8 @@ def validate_resource(path, data):
                     stations.append(item['station_id'])
                 if values != sorted(values, reverse=True) or len(set(stations)) != len(stations):
                     raise ValueError('Invalid ranking order')
+        elif path == OFFICIAL_INDEX_PATH:
+            validate_official_index(data)
         else:
             raise ValueError('Unapproved public resource path')
     except (KeyError, TypeError, RuntimeError, OverflowError, AttributeError) as exc:

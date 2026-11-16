@@ -11,7 +11,7 @@ from .history_reconciliation import history_due, history_scope
 from .pages_package import pack_snapshot, unpack_snapshot
 from .publication import atomic_write_json
 from .scheduling import default_tasks, is_due, restore_state, record_result
-from .snapshot_runner import belongs, run_candidate
+from .snapshot_runner import TROPICAL_PREFIXES, belongs, run_candidate
 from .snapshots import read_resources
 
 TAIPEI = timezone(timedelta(hours=8))
@@ -47,7 +47,11 @@ def deployment_decision(mode, changed, content, checks, online, *, selected_cont
         seed_time = datetime.fromisoformat(selected_content['content_created_at'].replace('Z', '+00:00'))
         if seed_time <= online_time:
             return False, 'seed_version_not_newer'
-    attempted = [c for c in checks.values() if c['state'] not in ('not_due', 'history_recheck')]
+    # Tropical tasks never take part in the "every source check failed" rule:
+    # without them this decision must equal the pre-tropical one (design.md 5.5).
+    attempted = [c for kind, c in checks.items() if not kind.startswith('tropical_')
+                 and c['state'] not in ('not_due', 'history_recheck')]
+    products = {kind: value for kind, value in (products or {}).items() if not kind.startswith('tropical_')}
     if not changed and ((attempted and all(c['state'] == 'retained_after_failure' for c in attempted))
                         or (products and all(value == 'failed' for value in products.values()))):
         return False, 'all_source_checks_failed'
@@ -121,6 +125,7 @@ def prepare_due(archive, sha256, work, *, mode, policy, task_config=None, state_
                 failure = True
             latest_ok = context.outcomes.get(kind, {}).get('latest_ok', not failure)
             latest_name = ('rainfall/rankings/latest.json' if kind == 'rainfall_rankings'
+                           else TROPICAL_PREFIXES[kind] + 'index.json' if kind in TROPICAL_PREFIXES
                            else f'images/{kind}/latest.json')
             if latest_name not in after or latest_name in bad:
                 failure, latest_ok = True, False
@@ -133,7 +138,9 @@ def prepare_due(archive, sha256, work, *, mode, policy, task_config=None, state_
                          and daily_name in after and daily_name not in bad else set())
             # A required body hash is part of validating this check, not an
             # optional Last-Modified proxy. Hash errors cannot claim success.
-            if (not failure or preserved) and kind not in history_only:
+            # Tropical resources carry no images; hashing would only rewrite
+            # their bytes in another JSON layout (design.md 5.2 item 3).
+            if (not failure or preserved) and kind not in history_only and kind not in TROPICAL_PREFIXES:
                 try:
                     verified_names = {name for name in after if belongs(name, kind)
                                       and (not failure or name in preserved)}

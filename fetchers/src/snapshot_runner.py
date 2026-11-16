@@ -13,8 +13,14 @@ from .snapshots import REQUIRED, read_resources, export_snapshot
 from .update_runner import FileLock
 
 
+# Tropical tasks own one non-overlapping prefix each (design.md 5.2).
+TROPICAL_PREFIXES = {'tropical_official': 'tropical/official/', 'tropical_models': 'tropical/models/',
+                     'tropical_ensemble': 'tropical/ensemble/'}
+
+
 def belongs(name, product):
-    prefix = 'rainfall/rankings/' if product == 'rainfall_rankings' else f'images/{product}/'
+    prefix = ('rainfall/rankings/' if product == 'rainfall_rankings'
+              else TROPICAL_PREFIXES.get(product) or f'images/{product}/')
     return name.startswith(prefix)
 
 

@@ -80,7 +80,7 @@ def _valid_schedule_cache(config, task):
 
 
 def default_tasks():
-    """Return fresh copies of the confirmed 13 interval schedules."""
+    """Return fresh copies of the confirmed interval schedules (13 image tasks, then tropical tasks)."""
     policy = Path(__file__).resolve().parents[1] / 'policies' / 'due-intervals.json'
     return json.loads(policy.read_text(encoding='utf-8'))['tasks']
 

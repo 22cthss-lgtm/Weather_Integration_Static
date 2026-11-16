@@ -10,7 +10,7 @@ from src.snapshot_runner import run_candidate, current_snapshot
 from src.snapshots import restore_snapshot
 from src.publication import atomic_write_json
 from src.update_runner import FileLock, UpdateInProgress
-from update_images import registered_products, update_image
+from update_images import TROPICAL_TASKS, registered_products, update_image
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -26,7 +26,7 @@ def main(argv=None):
     parser.add_argument('--previous-snapshot', type=Path, help='Explicit manifest snapshot to restore')
     args = parser.parse_args(argv)
     registered = registered_products()
-    if set(args.types) - registered.keys():
+    if set(args.types) - registered.keys() - TROPICAL_TASKS.keys():
         parser.error('Unknown product')
     if args.seed_data and args.previous_snapshot:
         parser.error('Choose seed data or previous snapshot')
