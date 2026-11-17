@@ -25,7 +25,16 @@ MAX_BODY = 2 * 1024 * 1024
 LISTING_RETRY_DELAYS = (2, 4)
 # After the single dispatch POST, a newly created run can take tens of seconds to
 # appear in filtered listings. Observe for about a minute; never resend the POST.
+# Relay 43835501368 (2026-11-16): the publisher run existed 1 s after the POST but
+# stayed out of the created>= listing for the whole window, so the run ID from the
+# POST response is checked directly first and the listing is only a fallback.
 RECONCILE_DELAYS = (2, 4, 8, 15, 15, 15)
+# No new reconcile read starts after this many seconds. It is not a hard cap: the
+# last round may still spend its GET retries (a few minutes in pathological cases).
+RECONCILE_BUDGET = 120
+# Read failures that may clear on a later read. Anything else (bad identity,
+# ambiguous matches, refused documents) still stops the relay.
+TRANSIENT_READ_ERRORS = ('api_transport_or_retry_exhausted', 'incomplete_run_query')
 # Publisher admission waits for its own run to appear (~29 s; admission job limit 3 min).
 ADMISSION_DELAYS = (2, 4, 8, 15)
 
@@ -40,6 +49,19 @@ class Stopped(RelayError):
 
 class Busy(RelayError):
     pass
+
+
+class TooManyRuns(RelayError):
+    """More than 100 matching runs: not transient, never treated as a listing miss."""
+    def __init__(self):
+        super().__init__('incomplete_run_query')
+
+
+class Unconfirmed(RelayError):
+    """The sole POST was sent (or its result is unknown) but no run was confirmed."""
+    def __init__(self, post_accepted):
+        super().__init__('dispatch_unconfirmed_no_resend')
+        self.post_accepted = post_accepted
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -149,7 +171,7 @@ class Controller:
                     or not isinstance(result.get('workflow_runs'), list)):
                 raise RelayError('incomplete_run_query')
             if result['total_count'] > 100 or len(result['workflow_runs']) > 100:
-                raise RelayError('incomplete_run_query')  # Too many rows: not transient.
+                raise TooManyRuns()  # Too many rows: not transient.
             if result['total_count'] == len(result['workflow_runs']) and result['total_count'] >= 0:
                 break
             if attempt == len(LISTING_RETRY_DELAYS):
@@ -181,23 +203,60 @@ class Controller:
             if busy:
                 raise Busy(', '.join(str(row['id']) + ':' + row['status'] for row in busy))
         self.enabled()  # Live read immediately before the sole POST.
+        response, post_accepted = None, True
         try:
-            self.api.request('POST', '/actions/workflows/' + workflow + '/dispatches',
-                             {'ref': self.env['DEFAULT_BRANCH'], 'inputs': inputs})
+            response = self.api.request('POST', '/actions/workflows/' + workflow + '/dispatches',
+                                        {'ref': self.env['DEFAULT_BRANCH'], 'inputs': inputs})
         except RelayError as error:
+            if str(error).startswith('api_http_'):
+                # 429/5xx surface as transport errors; any other HTTP status is an
+                # explicit rejection, so no run exists. Fail visibly, never resend.
+                raise RelayError('dispatch_rejected_' + str(error)[len('api_http_'):]) from None
+            post_accepted = False
             self.report('dispatch_response', str(error) + '; reconcile only, no resend')
+        run_id = response.get('workflow_run_id') if isinstance(response, dict) else None
+        if type(run_id) is not int or run_id <= 0:
+            run_id = None
+        deadline = self.clock() + RECONCILE_BUDGET
         for attempt in range(len(RECONCILE_DELAYS) + 1):
-            matches = self.matching(workflow, title, since)
-            if len(matches) > 1:
-                raise RelayError('ambiguous_dispatch_identity')
-            if matches:
+            found = self.reconcile_once(workflow, title, since, run_id)
+            if found:
                 if attempt:
                     self.report('dispatch_confirmed_after_reads', attempt + 1)
-                return matches[0]
-            if attempt < len(RECONCILE_DELAYS):
-                self.sleep(RECONCILE_DELAYS[attempt])
-                self.enabled()
-        raise RelayError('dispatch_unconfirmed_no_resend')
+                return found
+            if attempt == len(RECONCILE_DELAYS) or self.clock() >= deadline:
+                break
+            self.sleep(RECONCILE_DELAYS[attempt])
+            self.enabled()
+        raise Unconfirmed(post_accepted)
+
+    def reconcile_once(self, workflow, title, since, run_id):
+        """One read after the POST: the returned run ID first, then the listing."""
+        if run_id is not None:
+            try:
+                run = self.validate_run(self.api.request('GET', '/actions/runs/' + str(run_id)), workflow)
+            except RelayError as error:
+                # A just-created run may briefly 404 by ID; treat like a listing miss.
+                if isinstance(error, TooManyRuns) or str(error) not in (*TRANSIENT_READ_ERRORS, 'api_http_404'):
+                    raise
+                run = None
+            if run is not None:
+                if (run['id'] != run_id or run.get('head_branch') != self.env['DEFAULT_BRANCH']
+                        or run.get('event') != 'workflow_dispatch' or timestamp(run['created_at']) < since):
+                    raise RelayError('untrusted_dispatch_response')
+                if run['display_title'] == title:
+                    self.report('dispatch_confirmed_by_id', run_id)
+                    return run
+                # The run-name may not be evaluated yet; fall through to the listing.
+        try:
+            matches = self.matching(workflow, title, since)
+        except RelayError as error:
+            if isinstance(error, TooManyRuns) or str(error) not in TRANSIENT_READ_ERRORS:
+                raise
+            return None
+        if len(matches) > 1 or (matches and run_id is not None and matches[0]['id'] != run_id):
+            raise RelayError('ambiguous_dispatch_identity')
+        return matches[0] if matches else None
 
     def wait_until(self, deadline):
         while True:
@@ -304,20 +363,40 @@ class Controller:
                         'Pages chain ' + request_id, timestamp(current['created_at']))
                 except Busy as error:
                     self.report('busy', str(error) + '; changed during preflight, no update dispatched')
+                except Unconfirmed as error:
+                    # Never resend. If the run exists, the next relay sees it as busy or
+                    # recent; publisher admission still rejects an earlier same-ID run.
+                    self.report('update_unconfirmed', 'Pages chain ' + request_id + '; ' +
+                                ('POST accepted' if error.post_accepted else 'POST result unknown') +
+                                '; no resend; relay continues')
                 if child:
                     self.report('update_run', child['id'])
                     self.report('update_request', request_id)
         self.report('next_target', 'about 600 seconds from controller admission; no catch-up burst')
         self.wait_until(started + INTERVAL)
         if child:
-            observed = self.validate_run(self.api.request('GET', '/actions/runs/' + str(child['id'])), PUBLISH)
-            if observed['id'] != child['id']:
-                raise RelayError('inconsistent_child_identity')
-            self.report('update_observed_result', str(observed['id']) + ':' + observed['status'] + ':' +
-                        str(observed.get('conclusion')) + ' (observation, not a completion guarantee)')
+            try:
+                observed = self.validate_run(self.api.request('GET', '/actions/runs/' + str(child['id'])), PUBLISH)
+            except RelayError as error:
+                if str(error) not in TRANSIENT_READ_ERRORS:
+                    raise
+                # Observation only: a failed read must not block the hand-off.
+                self.report('update_observed_result', str(child['id']) + ': not observed (' + str(error) + ')')
+            else:
+                if observed['id'] != child['id']:
+                    raise RelayError('inconsistent_child_identity')
+                self.report('update_observed_result', str(observed['id']) + ':' + observed['status'] + ':' +
+                            str(observed.get('conclusion')) + ' (observation, not a completion guarantee)')
         next_id = 'r' + identifier + 'a' + attempt
-        following = self.dispatch(RELAY, {'relay_request_id': next_id}, 'Relay ' + next_id,
-                                  timestamp(current['created_at']))
+        try:
+            following = self.dispatch(RELAY, {'relay_request_id': next_id}, 'Relay ' + next_id,
+                                      timestamp(current['created_at']))
+        except Unconfirmed as error:
+            self.report('next_relay_unconfirmed', 'Relay ' + next_id + '; no resend; ' +
+                        ('POST accepted, so the run is probably pending behind the weather-relay lock'
+                         if error.post_accepted else 'POST result unknown; cron may be needed to resume'))
+            self.report('next_request', next_id)
+            raise
         self.report('next_relay', str(following['id']) + ':' + following['status'] + '; completion not yet observed')
         self.report('next_request', next_id)
 
