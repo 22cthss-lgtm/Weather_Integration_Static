@@ -538,5 +538,320 @@ class TaskTests(unittest.TestCase):
         self.assertNotIn(SECRET, ''.join(seen) + captured.getvalue())
 
 
+ANALYSIS = 'tropical/official/storms/2026-jma-tc2638/analysis.json'
+FORECAST = 'tropical/official/storms/2026-jma-tc2638/forecast.json'
+LATER = datetime(2026, 11, 11, 16, 30, tzinfo=UTC)  # Taiwan 00:30 on 11-12
+
+
+def final_routes():
+    """Real final products of CEMPAKA, as seen at LATER."""
+    return {CWA_URL: fixture('cwa_datastore_cempaka.json'),
+            JMA_FEED: fixture('jma_extra_feed_cropped.xml').replace(
+                b'20261111094118_0_VPTW60', b'20261111124152_0_VPTW60').replace(
+                b'<updated>2026-11-11T09:41:17Z</updated>', b'<updated>2026-11-11T12:41:52Z</updated>'),
+            tt.JMA_BULLETIN.format('20261111124152'): fixture('jma_vptw60_tc2638_final.xml'),
+            JMA_TARGET: fixture('jma_targetTc_low.json'),
+            JTWC_RSS: fixture('jtwc_rss_final.xml'),
+            JTWC_PRODUCT.format('wp3126.tcw'): fixture('jtwc_wp3126_final.tcw'),
+            JTWC_PRODUCT.format('cp0426.tcw'): fixture('jtwc_cp0426_warning23.tcw')}
+
+
+def read(root, name):
+    return json.loads((Path(root) / name).read_text(encoding='utf-8'))
+
+
+class StormFileTaskTests(unittest.TestCase):
+    """analysis.json and forecast.json (design.md 1.4, 1.5, 3.3, 6.1, 11b)."""
+
+    update = TaskTests.update
+
+    def test_real_samples_write_both_files(self):
+        from src.tropical_contract import validate_storm_file
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            analysis, forecast = read(root, ANALYSIS), read(root, FORECAST)
+            validate_storm_file(ANALYSIS, analysis)
+            validate_storm_file(FORECAST, forecast)
+            agencies = analysis['agencies']
+            self.assertEqual(agencies['jtwc']['product_url'], JTWC_PRODUCT.format('wp3126.tcw'))
+            self.assertEqual(agencies['jtwc']['graphic_url'], JTWC_PRODUCT.format('wp3126.gif'))
+            self.assertEqual(agencies['jma']['product_url'], tt.JMA_BULLETIN.format('20261111094118'))
+            self.assertEqual((agencies['cwa']['past_track_origin'], len(agencies['cwa']['past_track'])), ('source', 21))
+            # The 06:40 bulletin of the same system (same body in this fixture) adds nothing older.
+            self.assertEqual((agencies['jtwc']['past_track'], agencies['jma']['past_track']), ([], []))
+            # The fix equals the index summary of the same agency.
+            index = read(root, OFFICIAL_INDEX_PATH)
+            for agency, block in agencies.items():
+                summary = index['storms'][0]['summary'][agency]
+                self.assertEqual({key: block['fix'][key] for key in ('analysis_time', 'lat', 'lon', 'max_wind')},
+                                 {key: summary[key] for key in ('analysis_time', 'lat', 'lon', 'max_wind')})
+            self.assertEqual([len(forecast['agencies'][a]['points']) for a in ('jtwc', 'jma', 'cwa')], [2, 2, 2])
+            text = ''.join(path.read_text(encoding='utf-8') for path in root.rglob('*.json'))
+            for forbidden in (SECRET, 'opendata.cwa.gov.tw/api', 'image_url', 'source_url'):
+                self.assertNotIn(forbidden, text)
+            # PENA (east of 180) has no index entry and so no files.
+            self.assertEqual(sorted(p.name for p in (root / 'tropical/official/storms').iterdir()), ['2026-jma-tc2638'])
+
+    def test_later_run_accumulates_tracks_and_keeps_only_the_latest_report(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            _, transport = self.update(root, final_routes(), LATER)
+            agencies = read(root, ANALYSIS)['agencies']
+            jtwc, jma = agencies['jtwc'], agencies['jma']
+            self.assertEqual((jtwc['fix']['analysis_time'], jtwc['final'], jtwc['bulletin']),
+                             ('2026-11-11T12:00:00Z', True, '022'))
+            self.assertEqual([p['analysis_time'] for p in jtwc['past_track']], ['2026-11-11T06:00:00Z'])
+            self.assertEqual(jtwc['past_track'][0]['lat'], 29.1)
+            self.assertEqual((jma['fix']['analysis_time'], jma['final']), ('2026-11-11T12:00:00Z', True))
+            self.assertEqual([p['analysis_time'] for p in jma['past_track']], ['2026-11-11T09:00:00Z'])
+            forecast = read(root, FORECAST)['agencies']
+            self.assertEqual(forecast['jma']['points'], [])  # final bulletin: no forecast part
+            self.assertEqual(forecast['jtwc']['init_time'], '2026-11-11T12:00:00Z')
+            # CWA served the same response: same blocks.
+            self.assertEqual(agencies['cwa']['fix']['analysis_time'], '2026-11-11T06:00:00Z')
+            # A third run sees nothing new: the saved JMA bulletin is not downloaded again.
+            _, transport = self.update(root, final_routes(), LATER + hours(0.5))
+            self.assertNotIn(tt.JMA_BULLETIN.format('20261111124152'), transport.urls)
+            self.assertEqual([p['analysis_time'] for p in read(root, ANALYSIS)['agencies']['jma']['past_track']],
+                             ['2026-11-11T09:00:00Z'])
+
+    def test_failed_source_keeps_its_saved_blocks(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            before_a, before_f = read(root, ANALYSIS)['agencies'], read(root, FORECAST)['agencies']
+            routes = dict(final_routes(), **{JTWC_RSS: 500})
+            index, _ = self.update(root, routes, LATER)
+            self.assertEqual(index['sources']['jtwc']['state'], 'failed')
+            after_a, after_f = read(root, ANALYSIS)['agencies'], read(root, FORECAST)['agencies']
+            self.assertEqual((after_a['jtwc'], after_f['jtwc']), (before_a['jtwc'], before_f['jtwc']))
+            self.assertNotEqual(after_a['jma'], before_a['jma'])
+
+    def test_one_failed_product_keeps_that_block_and_updates_the_rest(self):
+        # JTWC failed as a source (one .tcw missing) but the other product is still used (design.md 3.3).
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            routes = dict(final_routes(), **{JTWC_PRODUCT.format('cp0426.tcw'): 403})
+            index, _ = self.update(root, routes, LATER)
+            self.assertEqual(index['sources']['jtwc']['state'], 'failed')
+            self.assertEqual(read(root, ANALYSIS)['agencies']['jtwc']['bulletin'], '022')
+
+    def test_index_only_snapshot_upgrades_without_loss(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            for name in (ANALYSIS, FORECAST):
+                (root / name).unlink()
+            # JTWC down in the first S6 run: nothing to carry, so the block is null for now (11b #2).
+            index, transport = self.update(root, dict(tt.cempaka_routes(), **{JTWC_RSS: 500}), NOW + hours(0.5))
+            self.assertIsNotNone(index['storms'][0]['summary']['jtwc'])
+            analysis = read(root, ANALYSIS)['agencies']
+            self.assertIsNone(analysis['jtwc'])
+            self.assertIsNotNone(analysis['cwa'])
+            # No saved JMA URL yet: the S4 interim applies and the bulletins are read again.
+            self.assertIn(tt.JMA_BULLETIN.format('20261111094118'), transport.urls)
+            self.assertIsNotNone(analysis['jma'])
+            self.update(root, tt.cempaka_routes(), NOW + hours(1))
+            self.assertIsNotNone(read(root, ANALYSIS)['agencies']['jtwc'])
+
+    def test_leftover_files_of_an_unlisted_system_are_never_read(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            (root / ANALYSIS).parent.mkdir(parents=True)
+            (root / ANALYSIS).write_text(json.dumps(tt.valid_analysis()), encoding='utf-8')
+            # No previous index: the system is minted again with the same ID and starts clean.
+            self.update(root, tt.cempaka_routes())
+            agencies = read(root, ANALYSIS)['agencies']
+            self.assertEqual(agencies['jtwc']['past_track'], [])
+            self.assertEqual(agencies['jma']['past_track'], [])
+
+    def test_invalid_saved_file_is_treated_as_absent(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            (root / ANALYSIS).write_text('{"schema_version": 1}', encoding='utf-8')
+            self.update(root, dict(final_routes(), **{JTWC_RSS: 500}), LATER)
+            analysis = read(root, ANALYSIS)['agencies']
+            self.assertIsNone(analysis['jtwc'])
+            self.assertEqual(analysis['jma']['past_track'], [])
+
+    def test_index_is_written_last(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            before = (root / OFFICIAL_INDEX_PATH).read_bytes()
+            order = []
+            real = official.atomic_write_json
+
+            def failing(data, path, prefix):
+                order.append(Path(path).name)
+                if Path(path).name == 'forecast.json':
+                    raise OSError('disk full')
+                return real(data, path, prefix=prefix)
+            with mock.patch.object(official, 'atomic_write_json', failing), self.assertRaises(OSError):
+                self.update(root, final_routes(), LATER)
+            self.assertEqual(order, ['analysis.json', 'forecast.json'])
+            # The caller (checked_update) rolls the prefix back; the index itself was never touched.
+            self.assertEqual((root / OFFICIAL_INDEX_PATH).read_bytes(), before)
+            order.clear()
+            with mock.patch.object(official, 'atomic_write_json',
+                                   lambda data, path, prefix: (order.append(Path(path).name), real(data, path, prefix=prefix))[1]):
+                self.update(root, final_routes(), LATER)
+            self.assertEqual(order[-1], 'index.json')
+
+    def test_storm_file_failing_validation_is_skipped_and_index_still_written(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            saved = (root / FORECAST).read_bytes()
+            real = official.build_storm_files
+
+            def broken(*arguments):
+                outputs = real(*arguments)
+                outputs[FORECAST]['agencies']['jtwc']['points'][0]['valid_time'] = '2000-01-01T00:00:00Z'
+                return outputs
+            with mock.patch.object(official, 'build_storm_files', broken):
+                index, _ = self.update(root, final_routes(), LATER)
+            self.assertEqual((root / FORECAST).read_bytes(), saved)
+            self.assertEqual(read(root, OFFICIAL_INDEX_PATH), index)
+            self.assertEqual(read(root, ANALYSIS)['agencies']['jtwc']['bulletin'], '022')
+
+    def test_files_follow_the_index_when_a_system_ends_and_leaves(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            self.update(root, tt.cempaka_routes())
+            self.update(root, final_routes(), LATER)
+            index, _ = self.update(root, final_routes(), datetime(2026, 11, 11, 21, 0, 1, tzinfo=UTC))
+            self.assertEqual(index['storms'][0]['status'], 'ended')
+            self.assertTrue((root / ANALYSIS).exists())  # kept during the 48 h retention
+            index, _ = self.update(root, final_routes(), datetime(2026, 11, 13, 21, 2, tzinfo=UTC))
+            self.assertEqual(index['storms'], [])
+            # The task never deletes: removal is the prune step's job (design.md 3.6, S6b).
+            self.assertTrue((root / ANALYSIS).exists())
+
+
+def track(count, start=datetime(2026, 10, 1, tzinfo=UTC), step=3):
+    return [{'analysis_time': tt.stamp(start + hours(step * n)), 'lat': 20.0, 'lon': 140.0, 'category': None,
+             'max_wind': None, 'pressure_hpa': None} for n in range(count)]
+
+
+class AccumulationAndSizeTests(unittest.TestCase):
+    def detailed(self, when, **extra):
+        item = record('jtwc', when=when)
+        item['analysis'] = {'fix': {'analysis_time': tt.stamp(when)}}
+        item.update(extra)
+        return item
+
+    def test_track_holds_saved_points_and_fix_capped_at_160_without_duplicates(self):
+        when = datetime(2026, 11, 1, tzinfo=UTC)
+        saved = {'past_track': track(159, step=1),
+                 'fix': dict(track(1, start=when - hours(2))[0], gust=None, movement=None, radii=[])}
+        extra = [track(1, start=when - hours(1))[0], track(1, start=when - hours(2))[0], track(1, start=when)[0]]
+        points = official._accumulated(saved, self.detailed(when, extra_points=extra))
+        times = [point['analysis_time'] for point in points]
+        self.assertEqual(len(points), 160)
+        self.assertEqual(times, sorted(set(times)))
+        self.assertLess(times[-1], tt.stamp(when))  # never the current fix
+        self.assertEqual(times[-1], tt.stamp(when - hours(1)))
+        self.assertNotIn(saved['past_track'][0]['analysis_time'], times)  # oldest dropped first
+
+    def test_older_saved_fix_than_new_one_only(self):
+        when = datetime(2027, 1, 1, tzinfo=UTC)  # across the new year
+        saved = {'past_track': [], 'fix': dict(track(1, start=datetime(2026, 12, 31, 18, tzinfo=UTC))[0])}
+        points = official._accumulated(saved, self.detailed(when, extra_points=[]))
+        self.assertEqual([p['analysis_time'] for p in points], ['2026-12-31T18:00:00Z'])
+        # A re-issued report for the same analysis time adds nothing.
+        same = {'past_track': [], 'fix': dict(track(1, start=when)[0])}
+        self.assertEqual(official._accumulated(same, self.detailed(when, extra_points=[])), [])
+
+    def outputs(self, ended_count=1, points=160):
+        index = validate_official_index(tt.valid_index())
+        storms = [index['storms'][0]]
+        for number in range(ended_count):
+            storm = deepcopy(index['storms'][0])
+            storm['cyclone_id'] = f'2026-jma-tc26{40 + number}'
+            storm['ids']['jma_tc'] = f'TC26{40 + number}'
+            for summary in storm['summary'].values():
+                summary['active'] = False
+            storm.update(status='ended', ended_at=tt.stamp(datetime(2026, 11, 1, tzinfo=UTC) + hours(24 * number)))
+            storms.append(storm)
+        index['storms'] = sorted(storms, key=lambda storm: storm['cyclone_id'])
+        files = {}
+        for storm in index['storms']:
+            analysis = tt.valid_analysis()
+            analysis['cyclone_id'] = storm['cyclone_id']
+            for agency in ('jtwc', 'jma'):
+                analysis['agencies'][agency]['past_track'] = track(points, start=datetime(2026, 10, 1, tzinfo=UTC))
+            files[official.storm_path(storm['cyclone_id'], 'analysis')] = analysis
+        return validate_official_index(index), files
+
+    def test_real_sizes_are_far_below_the_limits(self):
+        index, files = self.outputs(ended_count=11)
+        total = official._size(index) + sum(official._size(data) for data in files.values())
+        self.assertLess(max(official._size(data) for data in files.values()), official.MAX_ANALYSIS_BYTES)
+        _, kept = official.limit_sizes(index, files)
+        self.assertEqual(len(kept), 12)
+        self.assertGreater(total, 0)
+
+    def test_file_limit_halves_tracks_oldest_first(self):
+        from unittest import mock
+        index, files = self.outputs(ended_count=0)
+        path = next(iter(files))
+        newest = files[path]['agencies']['jtwc']['past_track'][-1]
+        with mock.patch.object(official, 'MAX_ANALYSIS_BYTES', official._size(files[path]) - 1):
+            _, kept = official.limit_sizes(index, files)
+        self.assertEqual(len(kept[path]['agencies']['jtwc']['past_track']), 80)
+        self.assertEqual(kept[path]['agencies']['jtwc']['past_track'][-1], newest)
+
+    def test_prefix_limit_drops_longest_ended_first_then_halves_then_fails(self):
+        from unittest import mock
+        index, files = self.outputs(ended_count=2)
+        total = official._size(index) + sum(official._size(data) for data in files.values())
+        with mock.patch.object(official, 'MAX_OFFICIAL_BYTES', total - 1):
+            kept_index, kept = official.limit_sizes(deepcopy(index), deepcopy(files))
+        self.assertEqual([s['cyclone_id'] for s in kept_index['storms']], ['2026-jma-tc2638', '2026-jma-tc2641'])
+        validate_official_index(kept_index)  # status and counts stay consistent
+        self.assertNotIn(official.storm_path('2026-jma-tc2640', 'analysis'), kept)
+        active_only = {official.storm_path('2026-jma-tc2638', 'analysis'): files[official.storm_path('2026-jma-tc2638', 'analysis')]}
+        small_index = deepcopy(index)
+        small_index['storms'] = [s for s in small_index['storms'] if s['status'] == 'active']
+        size = official._size(small_index) + official._size(next(iter(active_only.values())))
+        with mock.patch.object(official, 'MAX_OFFICIAL_BYTES', size - 1):
+            _, kept = official.limit_sizes(deepcopy(small_index), deepcopy(active_only))
+        self.assertLess(len(next(iter(kept.values()))['agencies']['jtwc']['past_track']), 160)
+        with mock.patch.object(official, 'MAX_OFFICIAL_BYTES', 10), self.assertRaises(ValueError):
+            official.limit_sizes(deepcopy(small_index), deepcopy(active_only))
+
+    def test_known_jma_uses_the_saved_bulletin_only_when_it_is_the_summarised_one(self):
+        previous = validate_official_index(tt.valid_index())
+        files = {'2026-jma-tc2638': {'analysis': tt.valid_analysis(), 'forecast': None}}
+        item, = official._known_jma(previous, files)
+        self.assertEqual(item['product_url'], tt.JMA_BULLETIN.format('20261111094118'))
+        self.assertEqual(item['feed_time'], datetime(2026, 11, 11, 9, 41, 18, tzinfo=UTC))
+        self.assertEqual(item['issued_at'], datetime(2026, 11, 11, 9, 45, tzinfo=UTC))
+        files['2026-jma-tc2638']['analysis']['agencies']['jma']['fix']['analysis_time'] = '2026-11-11T06:00:00Z'
+        item, = official._known_jma(previous, files)
+        self.assertNotIn('product_url', item)
+        item, = official._known_jma(previous)
+        self.assertNotIn('product_url', item)
+
+    def test_forecast_times_across_the_new_year_and_taiwan_midnight(self):
+        from src.services.tropical_jtwc import parse_tcw
+        text = fixture('jtwc_wp3126_warning21.tcw').decode('latin-1')
+        text = text.replace('WTPN51 PGTW 110900', 'WTPN51 PGTW 311500').replace('261111073859', '261231134500')
+        text = text.replace('2026111106 31W', '2026123112 31W')
+        record_ = parse_tcw(text.encode('latin-1'), JTWC_PRODUCT.format('wp3126.tcw'), final=False)
+        self.assertEqual(record_['analysis']['issued_at'], '2026-12-31T15:00:00Z')
+        self.assertEqual(record_['season'], 2026)  # from the product name, not the date
+        # 12 h after 12-31 12Z is 01-01 00Z, which is 08:00 in Taiwan; 24 h is 01-01 12Z (20:00 Taiwan).
+        self.assertEqual([p['valid_time'] for p in record_['forecast']['points']],
+                         ['2027-01-01T00:00:00Z', '2027-01-01T12:00:00Z'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,6 +1,6 @@
-"""tropical_official task: active-system index from CWA, JMA and JTWC.
+"""tropical_official task: index and per-storm files from CWA, JMA and JTWC.
 
-Design: docs/tropical-cyclone/design.md sections 1.3, 2.2, 2.3, 3 and 11a.
+Design: docs/tropical-cyclone/design.md sections 1.3-1.5, 2.2, 2.3, 3, 6.1, 11a and 11b.
 Every decision function takes ``now``; only ``update_tropical_official``
 reads the clock.
 """
@@ -14,12 +14,13 @@ import time
 
 from .http_client import http_scope
 from .publication import atomic_write_json
-from .services.tropical_common import SourceResult, TropicalClient, name_key
+from .services.tropical_common import SourceResult, TropicalClient, name_key, stamp
 from .services.tropical_cwa import fetch_cwa
-from .services.tropical_jma import fetch_jma
+from .services.tropical_jma import feed_time_of, fetch_jma
 from .services.tropical_jtwc import fetch_jtwc
-from .tropical_contract import (AGENCIES, MAX_STORMS, OFFICIAL_INDEX_PATH, REQUIRED_SOURCES,
-                                expected_status, format_stamp, parse_stamp, validate_official_index)
+from .tropical_contract import (AGENCIES, MAX_PAST_TRACK, MAX_STORMS, OFFICIAL_INDEX_PATH, REQUIRED_SOURCES,
+                                expected_status, format_stamp, parse_stamp, validate_official_index,
+                                validate_storm_file)
 
 # Initial values ([初值] in design.md 3.2, 3.3, 3.5, 2.3). Tune here.
 STALE_AFTER = {'jtwc': timedelta(hours=15), 'jma': timedelta(hours=9), 'cwa': timedelta(hours=15)}
@@ -29,6 +30,11 @@ NAME_MATCH_MAX_KM = 1500.0
 FUTURE_ANALYSIS_TOLERANCE = timedelta(hours=1)
 MINT_ORDER = ('jma', 'jtwc', 'cwa')
 EARTH_RADIUS_KM = 6371.0
+STORMS_DIR = 'tropical/official/storms'
+# Byte limits of design.md 6.1, measured in the published layout.
+MAX_ANALYSIS_BYTES = 256 * 1024
+MAX_FORECAST_BYTES = 64 * 1024
+MAX_OFFICIAL_BYTES = 1024 * 1024
 
 
 class AllSourcesFailed(RuntimeError):
@@ -82,7 +88,7 @@ def _mint_id(record):
     return f"{record['season']}-{agency}-{code}"
 
 
-def _apply(storm, record, how, now):
+def _apply(storm, record, how, now, applied=None):
     agency = record['agency']
     for key, value in record['ids'].items():
         if value is not None:
@@ -103,6 +109,9 @@ def _apply(storm, record, how, now):
         previous['active'] = previous['active'] and is_active(
             agency, parse_stamp(previous['analysis_time']), False, now)
         return
+    if applied is not None:
+        # The per-storm files take this agency's block from the same record (design.md 11b #1).
+        applied[(storm['cyclone_id'], agency)] = record
     storm['summary'][agency] = {
         'analysis_time': stamp, 'active': is_active(agency, record['analysis_time'], record['ended'], now),
         'lat': record['lat'], 'lon': record['lon'], 'category': record['category'],
@@ -124,8 +133,12 @@ def _still_listed(storm, agency, listed):
                and (storm['season'], kind, storm['ids']['cwa_' + kind]) in listed for kind in ('td', 'ty'))
 
 
-def build_index(previous, results, now):
-    """Pure decision: previous index (validated dict or None) + source results -> new index."""
+def build_index(previous, results, now, applied=None):
+    """Pure decision: previous index (validated dict or None) + source results -> new index.
+
+    ``applied`` (optional dict) receives ``(cyclone_id, agency) -> record`` for
+    every summary replaced in this run.
+    """
     now = now.astimezone(timezone.utc)
     for agency in AGENCIES:
         # An analysis from the future is a broken source value: it would stay "active" indefinitely.
@@ -150,9 +163,9 @@ def build_index(previous, results, now):
             if target is None:
                 pending.append(record)
                 continue
-            _apply(storms[target], record, 'id', now)
+            _apply(storms[target], record, 'id', now, applied)
             touched[agency].add(target)
-    # Rule 2 (name), then rule 4 (mint). Rule 3 (position) belongs to S6.
+    # Rule 2 (name), then rule 4 (mint). Rule 3 (position) belongs to S6b (design.md 11b).
     for record in pending:
         agency = record['agency']
         if not record['in_scope']:
@@ -167,14 +180,14 @@ def build_index(previous, results, now):
                     target = identity
                     break
         if target is not None:
-            _apply(storms[target], record, 'name', now)
+            _apply(storms[target], record, 'name', now, applied)
         elif is_active(agency, record['analysis_time'], record['ended'], now):
             storm = _new_storm(record)
             target = storm['cyclone_id']
             if target in storms:
                 continue  # Never overwrite an existing system.
             storms[target] = storm
-            _apply(storm, record, 'origin', now)
+            _apply(storm, record, 'origin', now, applied)
             storm['match'][agency] = 'origin'
         else:
             continue  # Inactive leftovers never mint a system (design.md 2.2).
@@ -241,14 +254,139 @@ def read_previous(path):
         return None
 
 
-def _known_jma(previous):
+def storm_path(identity, kind):
+    return f'{STORMS_DIR}/{identity}/{kind}.json'
+
+
+def read_previous_files(data_root, previous):
+    """Saved analysis/forecast files of the systems the previous index lists.
+
+    Files of systems not listed are never read: a leftover directory must not
+    leak an old track into a system minted again with the same ID (11b #1).
+    """
+    files = {}
+    for storm in (previous or {}).get('storms', []):
+        identity = storm['cyclone_id']
+        files[identity] = {}
+        for kind in ('analysis', 'forecast'):
+            path = storm_path(identity, kind)
+            try:
+                files[identity][kind] = validate_storm_file(path, json.loads((Path(data_root) / path).read_bytes()))
+            except Exception:  # noqa: BLE001 - unreadable (even RecursionError) means "not saved".
+                files[identity][kind] = None
+    return files
+
+
+def _saved_block(files, identity, kind, agency):
+    data = (files or {}).get(identity, {}).get(kind)
+    return None if data is None else data['agencies'][agency]
+
+
+def _known_jma(previous, files=None):
     known = []
     for storm in (previous or {}).get('storms', []):
         summary = storm['summary']['jma']
         if storm['ids']['jma_tc'] is not None and summary is not None:
-            known.append({'event': storm['ids']['jma_tc'], 'active': summary['active'],
-                          'analysis_time': parse_stamp(summary['analysis_time'])})
+            item = {'event': storm['ids']['jma_tc'], 'active': summary['active'],
+                    'analysis_time': parse_stamp(summary['analysis_time'])}
+            block = _saved_block(files, storm['cyclone_id'], 'analysis', 'jma')
+            # Only a saved bulletin that is the one behind the summary counts (5.3);
+            # otherwise the S4 interim applies to this system.
+            if block is not None and block['fix']['analysis_time'] == summary['analysis_time']:
+                item.update(product_url=block['product_url'], feed_time=feed_time_of(block['product_url']),
+                            issued_at=parse_stamp(block['issued_at']))
+            known.append(item)
     return known
+
+
+def _past_from_fix(fix):
+    return {key: fix[key] for key in ('analysis_time', 'lat', 'lon', 'category', 'max_wind', 'pressure_hpa')}
+
+
+def _accumulated(saved, record):
+    """design.md 1.4: every fix seen, oldest first, before the new fix, at most 160."""
+    points = {}
+    if saved is not None:
+        for point in saved['past_track'] + [_past_from_fix(saved['fix'])]:
+            points[point['analysis_time']] = point
+    for point in record['extra_points']:
+        points[point['analysis_time']] = point
+    current = stamp(record['analysis_time'])
+    return [points[key] for key in sorted(points) if key < current][-MAX_PAST_TRACK:]
+
+
+def build_storm_files(index, applied, files, now):
+    """Return {path: data} for every system in ``index`` (design.md 1.4, 1.5, 11b)."""
+    fetched = format_stamp(now)
+    output = {}
+    for storm in index['storms']:
+        identity = storm['cyclone_id']
+        analysis, forecast = {}, {}
+        for agency in AGENCIES:
+            record = applied.get((identity, agency))
+            if record is None or record.get('analysis') is None:
+                # Not fetched this run (or not newer): keep what was saved (3.3).
+                analysis[agency] = deepcopy(_saved_block(files, identity, 'analysis', agency))
+                forecast[agency] = deepcopy(_saved_block(files, identity, 'forecast', agency))
+                continue
+            block = deepcopy(record['analysis'])
+            if agency == 'cwa':
+                block.update(past_track_origin='source', past_track=deepcopy(record['source_track'] or []))
+            else:
+                block.update(past_track_origin='accumulated',
+                             past_track=_accumulated(_saved_block(files, identity, 'analysis', agency), record))
+            analysis[agency] = block
+            # Only the latest report is kept; a report without a forecast leaves none.
+            forecast[agency] = deepcopy(record.get('forecast'))
+        output[storm_path(identity, 'analysis')] = {'schema_version': 1, 'cyclone_id': identity,
+                                                    'fetched_at': fetched, 'agencies': analysis}
+        output[storm_path(identity, 'forecast')] = {'schema_version': 1, 'cyclone_id': identity,
+                                                    'fetched_at': fetched, 'agencies': forecast}
+    return output
+
+
+def _size(data):
+    # Same layout as publication.atomic_write_json.
+    return len((json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + '\n').encode('utf-8'))
+
+
+def _halve_tracks(data):
+    shortened = False
+    for block in data['agencies'].values():
+        if block is not None and 'past_track' in block and block['past_track']:
+            block['past_track'] = block['past_track'][len(block['past_track']) // 2 + len(block['past_track']) % 2:]
+            shortened = True
+    return shortened
+
+
+def limit_sizes(index, outputs):
+    """design.md 6.1: per-file limits, then the 1 MB prefix limit. Mutates and returns both."""
+    for path, data in outputs.items():
+        if path.endswith('/analysis.json'):
+            while _size(data) > MAX_ANALYSIS_BYTES and _halve_tracks(data):
+                pass
+    for path in [path for path, data in outputs.items()
+                 if _size(data) > (MAX_ANALYSIS_BYTES if path.endswith('/analysis.json') else MAX_FORECAST_BYTES)]:
+        del outputs[path]  # Not written; any saved file stays.
+
+    def total():
+        return _size(index) + sum(_size(data) for data in outputs.values())
+
+    # Ended systems leave first, the longest ended first. Dropping them changes
+    # neither the overall status nor any active_count (they have no active agency).
+    while total() > MAX_OFFICIAL_BYTES:
+        ended = sorted((storm for storm in index['storms'] if storm['status'] == 'ended'),
+                       key=lambda storm: (storm['ended_at'], storm['cyclone_id']))
+        if not ended:
+            break
+        index['storms'].remove(ended[0])
+        for kind in ('analysis', 'forecast'):
+            outputs.pop(storm_path(ended[0]['cyclone_id'], kind), None)
+    # Then every past track is halved, oldest points first; still too big fails the task.
+    while total() > MAX_OFFICIAL_BYTES:
+        if not [path for path, data in outputs.items() if _halve_tracks(data)]:
+            raise ValueError('tropical/official exceeds its size limit')
+    return index, outputs
 
 
 def _guarded(fetch, *arguments):
@@ -259,27 +397,41 @@ def _guarded(fetch, *arguments):
 
 
 def collect(previous, now, *, transport=None, wait=time.sleep, clock=time.monotonic,
-            api_key=None, policy=None):
+            api_key=None, policy=None, files=None):
     """Fetch the three sources inside this task's own request budget (design.md 5.4)."""
     with http_scope(policy):
         client = TropicalClient(transport, wait=wait, clock=clock)
         return {'cwa': _guarded(fetch_cwa, client, api_key),
-                'jma': _guarded(fetch_jma, client, _known_jma(previous), now),
+                'jma': _guarded(fetch_jma, client, _known_jma(previous, files), now),
                 'jtwc': _guarded(fetch_jtwc, client)}
 
 
 def update_tropical_official(data_root, *, now=None, transport=None, wait=time.sleep,
                              clock=time.monotonic, api_key=None, policy=None):
-    """Write ``tropical/official/index.json`` under ``data_root`` and return it.
+    """Write the per-storm files and then ``tropical/official/index.json``; return the index.
 
-    Raises when every source failed; the caller then keeps the previous file.
+    Raises when every source failed; the caller then keeps the previous files.
+    The task never deletes a file: removal is the prune step's job (design.md 3.6).
     """
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
     if api_key is None:
         api_key = os.environ.get('CWA_API_KEY', '')
-    path = Path(data_root) / OFFICIAL_INDEX_PATH
+    root = Path(data_root)
+    path = root / OFFICIAL_INDEX_PATH
     previous = read_previous(path)
+    files = read_previous_files(root, previous)
     results = collect(previous, now, transport=transport, wait=wait, clock=clock,
-                      api_key=api_key, policy=policy)
-    index = validate_official_index(build_index(previous, results, now))
+                      api_key=api_key, policy=policy, files=files)
+    applied = {}
+    index = build_index(previous, results, now, applied)
+    outputs = build_storm_files(index, applied, files, now)
+    index, outputs = limit_sizes(index, outputs)
+    index = validate_official_index(index)
+    for name, data in sorted(outputs.items()):
+        try:
+            validate_storm_file(name, data)
+        except ValueError:
+            continue  # Should not happen; the saved file (if any) stays (design.md 11b #1).
+        atomic_write_json(data, root / name, prefix='.tropical-official-')
+    # The index goes last, so a failure above leaves the previous index in place.
     return atomic_write_json(index, path, prefix='.tropical-official-')

@@ -643,5 +643,370 @@ class RealNoSystemTests(unittest.TestCase):
         self.assertEqual(result.records[0]['analysis_time'], datetime(2026, 11, 11, 6, tzinfo=UTC))
 
 
+# --- S6: per-storm file content --------------------------------------------------------
+
+def assert_blocks_valid(test, record):
+    """The parsed blocks must pass the public contract as they are (design.md 1.4, 1.5)."""
+    from src.tropical_contract import validate_storm_file
+    agency = record['agency']
+    analysis = dict(record['analysis'], past_track_origin='source' if agency == 'cwa' else 'accumulated',
+                    past_track=record['source_track'] if agency == 'cwa' else [])
+    for kind, block in (('analysis', analysis), ('forecast', record['forecast'])):
+        agencies = dict.fromkeys(('jtwc', 'jma', 'cwa'))
+        agencies[agency] = block
+        validate_storm_file(f'tropical/official/storms/2026-jma-tc2638/{kind}.json',
+                            {'schema_version': 1, 'cyclone_id': '2026-jma-tc2638',
+                             'fetched_at': '2026-11-11T10:30:00Z', 'agencies': agencies})
+
+
+def tcw_text(name):
+    return fixture(name).decode('latin-1')
+
+
+class JtwcDetailTests(unittest.TestCase):
+    def test_real_warning_fix_radii_gust_movement_and_forecast(self):
+        record = tropical_jtwc.parse_tcw(fixture('jtwc_wp3126_warning21.tcw'), WP3126, final=False,
+                                         graphic=JTWC_PRODUCT.format('wp3126.gif'))
+        analysis, forecast = record['analysis'], record['forecast']
+        self.assertEqual((analysis['issued_at'], analysis['bulletin'], analysis['final']),
+                         ('2026-11-11T09:00:00Z', '021', False))
+        self.assertEqual(analysis['graphic_url'], JTWC_PRODUCT.format('wp3126.gif'))
+        fix = analysis['fix']
+        self.assertEqual((fix['gust'], fix['pressure_hpa']), ({'kt': 80, 'ms': None}, 983))
+        self.assertEqual(fix['movement'], {'direction_deg': 70, 'direction_text': None, 'speed_kt': 33, 'speed_kmh': None})
+        self.assertEqual([item['threshold']['value'] for item in fix['radii']], [64, 50, 34])
+        self.assertEqual(fix['radii'][2]['sectors'][3], {'dir': 'NW', 'radius': 70})
+        self.assertEqual(forecast['init_time'], '2026-11-11T06:00:00Z')
+        self.assertEqual([(p['tau_h'], p['valid_time'], p['note']) for p in forecast['points']],
+                         [(12, '2026-11-11T18:00:00Z', 'DISSIPATING'), (24, '2026-11-12T06:00:00Z', 'DISSIPATED')])
+        self.assertEqual(forecast['points'][0]['max_wind'], {'kt': 55, 'ms': None, 'averaging_min': 1})
+        self.assertTrue(all(p['gust'] is None and p['probability_circle'] is None for p in forecast['points']))
+        assert_blocks_valid(self, record)
+
+    def test_real_final_and_central_pacific_samples(self):
+        final = tropical_jtwc.parse_tcw(fixture('jtwc_wp3126_final.tcw'), WP3126, final=True)
+        self.assertEqual((final['analysis']['issued_at'], final['analysis']['bulletin'], final['analysis']['final']),
+                         ('2026-11-11T15:00:00Z', '022', True))
+        # ATCF 0 means "no radius of this strength" -> null (design.md 1.2).
+        self.assertEqual(final['analysis']['fix']['radii'][0]['sectors'][0], {'dir': 'NE', 'radius': None})
+        assert_blocks_valid(self, final)
+        pena = tropical_jtwc.parse_tcw(fixture('jtwc_cp0426_warning23.tcw'), CP0426, final=False)
+        points = pena['forecast']['points']
+        self.assertEqual(points[-1]['tau_h'], 36)
+        self.assertEqual(points[-1]['lon'], -180.0)  # T036 1800E
+        self.assertEqual([p['note'] for p in points], [None, 'POST_TROPICAL', 'POST_TROPICAL'])
+        self.assertEqual(pena['analysis']['issued_at'], '2026-11-12T10:00:00Z')
+        assert_blocks_valid(self, pena)
+
+    def test_issue_time_month_from_second_line_across_month_and_year(self):
+        cases = (('WTPN51 PGTW 010300', '261130235959', '2026-12-01T03:00:00Z'),
+                 ('WTPN51 PGTW 302100', '261201000500', '2026-11-30T21:00:00Z'),
+                 ('WTPN51 PGTW 312100', '270101000100', '2026-12-31T21:00:00Z'),
+                 ('WTPN51 PGTW 010300', '261231235959', '2027-01-01T03:00:00Z'),
+                 ('WTPN51 PGTW 111500', '261111141257', '2026-11-11T15:00:00Z'))
+        analysis = datetime(2026, 11, 11, 12, tzinfo=UTC)
+        for first, second, expected in cases:
+            with self.subTest(first=first, second=second):
+                text = f'{first}    \nWARNING    ATCG MIL 31W NWP {second}\n2026111112 31W ...'
+                self.assertEqual(tt.stamp(tropical_jtwc.issued_time(text, None, analysis)), expected)
+
+    def test_issue_time_falls_back_to_rss_text_then_fails(self):
+        text = 'garbled first line\n2026111106 31W CEMPAKA 021'
+        analysis = datetime(2026, 11, 11, 6, tzinfo=UTC)
+        self.assertEqual(tt.stamp(tropical_jtwc.issued_time(text, ('11', '09', '00'), analysis)), '2026-11-11T09:00:00Z')
+        # Across a year: analysis 12-31 18Z, RSS "Issued at 01/0300Z".
+        self.assertEqual(tt.stamp(tropical_jtwc.issued_time(text, ('01', '03', '00'), datetime(2026, 12, 31, 18, tzinfo=UTC))),
+                         '2027-01-01T03:00:00Z')
+        with self.assertRaises(ValueError):
+            tropical_jtwc.issued_time(text, None, analysis)
+        # Without any issue time the product is a parse failure of the source (design.md #19).
+        body = tcw_text('jtwc_wp3126_warning21.tcw').split('\n', 2)[2].encode('latin-1')
+        with self.assertRaises(ValueError):
+            tropical_jtwc.parse_tcw(body, WP3126, final=False)
+
+    def test_fetch_takes_graphic_and_issue_time_from_the_rss_block(self):
+        result, _ = run(tropical_jtwc.fetch_jtwc, tt.cempaka_routes())
+        record = next(item for item in result.records if item['key'] == '31W')
+        self.assertEqual(record['analysis']['graphic_url'], JTWC_PRODUCT.format('wp3126.gif'))
+        self.assertEqual(record['analysis']['product_url'], WP3126)
+
+    def test_unusable_forecast_or_radii_never_fail_the_product(self):
+        # S6a review finding A: optional content must not cost the index its record.
+        base = tcw_text('jtwc_wp3126_warning21.tcw')
+        for label, body, check in (
+                ('point beyond 180', base.replace('T024 336N 1642E 045', 'T024 336N 1900E 045'),
+                 lambda r: self.assertIsNone(r['forecast'])),
+                ('tau above 240', base.replace('T024 336N', 'T264 336N'), lambda r: self.assertIsNone(r['forecast'])),
+                ('duplicate radii threshold', base.replace('R064 020 NE', 'R050 020 NE', 1),
+                 lambda r: self.assertEqual(r['analysis']['fix']['radii'], [])),
+                ('threshold 000', base.replace('R064 020 NE', 'R000 020 NE', 1),
+                 lambda r: self.assertEqual(r['analysis']['fix']['radii'], []))):
+            with self.subTest(label):
+                record = tropical_jtwc.parse_tcw(body.encode('latin-1'), WP3126, final=False)
+                self.assertEqual((record['analysis_time'], record['lat']), (datetime(2026, 11, 11, 6, tzinfo=UTC), 29.1))
+                check(record)
+                if record['forecast'] is not None:
+                    assert_blocks_valid(self, record)
+
+
+def jma_text(name='jma_vptw60_tc2638_serial52.xml'):
+    return fixture(name).decode('utf-8')
+
+
+class JmaDetailTests(unittest.TestCase):
+    def test_real_bulletin_fix_radii_and_forecast(self):
+        record = tropical_jma.parse_vptw60(fixture('jma_vptw60_tc2638_serial52.xml'), B0941)
+        analysis, forecast = record['analysis'], record['forecast']
+        self.assertEqual(record['feed_time'], datetime(2026, 11, 11, 9, 41, 18, tzinfo=UTC))
+        self.assertEqual((analysis['issued_at'], analysis['bulletin'], analysis['product_url']),
+                         ('2026-11-11T09:45:00Z', '52', B0941))
+        fix = analysis['fix']
+        self.assertEqual(fix['gust'], {'kt': 85, 'ms': 45})
+        self.assertEqual(fix['movement'], {'direction_deg': None, 'direction_text': 'ENE', 'speed_kt': 27, 'speed_kmh': 50})
+        # Thresholds are the ones the bulletin states (design.md 11b #3).
+        self.assertEqual(fix['radii'], [
+            {'threshold': {'value': 50, 'unit': 'kt'}, 'unit': 'nm', 'sectors': [{'dir': 'ALL', 'radius': 60}]},
+            {'threshold': {'value': 30, 'unit': 'kt'}, 'unit': 'nm', 'sectors': [{'dir': 'ALL', 'radius': 150}]}])
+        self.assertEqual([(p['tau_h'], p['valid_time']) for p in forecast['points']],
+                         [(12, '2026-11-11T21:00:00Z'), (24, '2026-11-12T09:00:00Z')])
+        self.assertEqual(forecast['points'][1]['probability_circle'], {'radius': 120, 'unit': 'km', 'probability_pct': 70})
+        # 暴風警戒域 is not a wind radius (design.md 11b #7).
+        self.assertEqual(forecast['points'][1]['radii'], [])
+        assert_blocks_valid(self, record)
+
+    def test_real_final_bulletin_has_no_forecast_points(self):
+        record = tropical_jma.parse_vptw60(fixture('jma_vptw60_tc2638_final.xml'), JMA_BULLETIN.format('20261111124152'))
+        self.assertEqual((record['analysis']['final'], record['forecast']['points']), (True, []))
+        self.assertEqual(record['analysis']['bulletin'], '53')
+        assert_blocks_valid(self, record)
+
+    def test_threshold_follows_the_bulletin_and_unknown_axes_are_left_out(self):
+        text = jma_text().replace('description="風速５０ノット以上" condition="以上" unit="ノット" type="風速">50<',
+                                  'description="x" condition="以上" unit="ノット" type="風速">48<', 1)
+        text = text.replace('description="全域" condition="全域" unit="８方位漢字" type="方向"/>',
+                            'unit="８方位漢字" type="方向">北北東</jmx_eb:Direction>', 1)
+        record = tropical_jma.parse_vptw60(text.encode('utf-8'), B0941)
+        # The first wind area lost its readable axis; the second is untouched.
+        self.assertEqual([item['threshold']['value'] for item in record['analysis']['fix']['radii']], [30])
+        text = jma_text().replace('type="風速">50<', 'type="風速">48<', 1)
+        record = tropical_jma.parse_vptw60(text.encode('utf-8'), B0941)
+        self.assertEqual([item['threshold']['value'] for item in record['analysis']['fix']['radii']], [48, 30])
+
+    def test_unknown_direction_word_is_null(self):
+        # No sample of the stationary or variable wording (design.md 11b #11).
+        text = jma_text().replace('type="移動方向">東北東<', 'type="移動方向">ほとんど停滞<', 1)
+        movement = tropical_jma.parse_vptw60(text.encode('utf-8'), B0941)['analysis']['fix']['movement']
+        self.assertEqual(movement, {'direction_deg': None, 'direction_text': None, 'speed_kt': 27, 'speed_kmh': 50})
+
+    def test_unusable_forecast_parts_keep_the_analysis(self):
+        # S6a review finding A.
+        base = jma_text()
+        cases = (
+            ('no probability circle', base.replace('<ProbabilityCircle type="予報円">', '<Other type="予報円">', 1)
+             .replace('</ProbabilityCircle>', '</Other>', 1)),
+            ('blank probability radius', base.replace('type="７０パーセント確率半径">120<', 'type="７０パーセント確率半径"><', 1)),
+            ('odd base point', base.replace('type="中心位置（度）">+37.6+168.7/<', 'type="中心位置（度）">north<')
+             .replace('type="中心位置（度分）">+3735+16840/<', 'type="中心位置（度分）">north<')),
+            ('repeated forecast time', base.replace('予報　２４時間後', '予報　１２時間後')))
+        for label, text in cases:
+            with self.subTest(label):
+                self.assertNotEqual(text, base)
+                record = tropical_jma.parse_vptw60(text.encode('utf-8'), B0941)
+                self.assertIsNone(record['forecast'])
+                self.assertEqual((record['analysis_time'], record['lat']), (T09, 29.2))
+                self.assertEqual(record['analysis']['fix']['radii'][0]['threshold']['value'], 50)
+
+    def test_maximum_wind_keeps_the_s4_range(self):
+        # S6a review finding B: 210 kt must be refused when parsed, as in S4, not reach the index.
+        text = jma_text().replace('unit="ノット" type="最大風速">60<', 'unit="ノット" type="最大風速">210<', 1)
+        self.assertNotEqual(text, jma_text())
+        with self.assertRaises(ValueError):
+            tropical_jma.parse_vptw60(text.encode('utf-8'), B0941)
+        gust = jma_text().replace('unit="ノット" type="最大瞬間風速">85<', 'unit="ノット" type="最大瞬間風速">230<', 1)
+        self.assertEqual(tropical_jma.parse_vptw60(gust.encode('utf-8'), B0941)['analysis']['fix']['gust']['kt'], 230)
+
+    def test_feed_time_is_read_from_the_url_only(self):
+        self.assertEqual(tropical_jma.feed_time_of(B0941), datetime(2026, 11, 11, 9, 41, 18, tzinfo=UTC))
+        for url in (None, 'https://example.com/x.xml', JMA_BULLETIN.format('20261399000000')):
+            self.assertIsNone(tropical_jma.feed_time_of(url))
+
+
+def saved(url, *, analysis, issued, active=True, event='TC2638'):
+    """A held JMA system whose analysis.json keeps a bulletin (the 5.3 flow)."""
+    return [{'event': event, 'analysis_time': analysis, 'active': active, 'product_url': url,
+             'feed_time': tropical_jma.feed_time_of(url), 'issued_at': issued}]
+
+
+class JmaSavedBulletinTests(unittest.TestCase):
+    """design.md 5.3 restored in S6 (11a #3): dedupe by saved URL, coverage by feed time."""
+
+    def fetch(self, routes, held=(), now=NOW):
+        return run(tropical_jma.fetch_jma, routes, list(held), now)
+
+    def test_saved_bulletin_is_not_downloaded_again_and_older_reports_are_dropped(self):
+        held = saved(B0941, analysis=T09, issued=datetime(2026, 11, 11, 9, 45, tzinfo=UTC))
+        result, transport = self.fetch(tt.cempaka_routes(), held)
+        # B0640 is re-read (accepted cost, 5.3) but is not newer than the saved report.
+        self.assertEqual(transport.urls, [JMA_FEED, B0640, JMA_TARGET])
+        self.assertEqual((result.state, result.records), ('ok', []))
+
+    def test_newer_report_replaces_the_saved_one(self):
+        held = saved(B0640, analysis=T09 - hours(3), issued=datetime(2026, 11, 11, 6, 45, tzinfo=UTC))
+        result, transport = self.fetch(tt.cempaka_routes(), held)
+        self.assertEqual(transport.urls, [JMA_FEED, B0941, JMA_TARGET])
+        self.assertEqual([record['analysis']['product_url'] for record in result.records], [B0941])
+
+    def test_two_systems_in_one_batch_are_both_taken(self):
+        # The reason for URL dedupe (5.3): a global "newer than the newest" filter would skip the second.
+        other = JMA_BULLETIN.format('20261111094120')
+        routes = {JMA_FEED: feed(('20261111094118', '2026-11-11T09:41:17Z'), ('20261111094120', '2026-11-11T09:41:20Z')),
+                  B0941: fixture('jma_vptw60_tc2638_serial52.xml'),
+                  other: bulletin(event='TC2639', name='DOKSURI', coordinate='+15.0+135.0/',
+                                  report='2026-11-11T18:40:00+09:00'),
+                  JMA_TARGET: b'[{"tropicalCyclone":"TC2638","category":"STS"},{"tropicalCyclone":"TC2639","category":"TS"}]'}
+        held = saved(other, analysis=T09, issued=datetime(2026, 11, 11, 9, 40, tzinfo=UTC), event='TC2639')
+        held += saved(JMA_BULLETIN.format('20261111064050'), analysis=T09 - hours(3),
+                      issued=datetime(2026, 11, 11, 6, 45, tzinfo=UTC))
+        result, transport = self.fetch(routes, held)
+        self.assertEqual(transport.urls, [JMA_FEED, B0941, JMA_TARGET])
+        self.assertEqual(sorted(record['key'] for record in result.records), ['TC2638'])
+        self.assertEqual(result.state, 'ok')
+
+    def test_coverage_uses_the_saved_feed_time(self):
+        # Analysis 01:00Z but bulletin in the feed at 03:00Z: the boundary is 03:00 + 3.5 h = 06:30.
+        url = JMA_BULLETIN.format('20261111030000')
+        for oldest, covered in (('2026-11-11T06:30:00Z', True), ('2026-11-11T06:30:01Z', False)):
+            with self.subTest(oldest=oldest):
+                routes = {JMA_FEED: feed(extra=(oldest,)), JMA_TARGET: 404, JMA_LONG: feed()}
+                held = saved(url, analysis=datetime(2026, 11, 11, 1, tzinfo=UTC),
+                             issued=datetime(2026, 11, 11, 3, 5, tzinfo=UTC), active=False)
+                result, transport = self.fetch(routes, held, now=datetime(2026, 11, 11, 7, tzinfo=UTC))
+                self.assertEqual(result.state, 'ok')
+                self.assertEqual(JMA_LONG in transport.urls, not covered)
+
+    def test_held_window_uses_the_saved_feed_time(self):
+        routes = {JMA_FEED: tt.SYNTHETIC_JMA_FEED_NO_VPTW, JMA_TARGET: fixture('jma_targetTc_active.json'), JMA_LONG: feed()}
+        for feed_at, ok in ((NOW - hours(6), True), (NOW - hours(6) - timedelta(seconds=1), False)):
+            with self.subTest(feed_at=feed_at):
+                url = JMA_BULLETIN.format(f'{feed_at:%Y%m%d%H%M%S}')
+                held = saved(url, analysis=NOW - hours(7), issued=feed_at, active=False)
+                result, transport = self.fetch(routes, held)
+                self.assertEqual(result.state == 'ok', ok)
+                self.assertEqual(JMA_LONG in transport.urls, not ok)
+
+    def test_missed_final_trigger_uses_the_saved_feed_time(self):
+        # Analysis 4.5 h old but in the feed 3 h 50 min ago: not stale yet, no long feed.
+        now = T09 + hours(4) + timedelta(minutes=30)
+        url = JMA_BULLETIN.format('20261111094000')
+        routes = {JMA_FEED: feed(extra=('2026-11-11T12:00:00Z',)), JMA_TARGET: fixture('jma_targetTc_active.json')}
+        result, transport = self.fetch(routes, saved(url, analysis=T09, issued=T09 + hours(1)), now=now)
+        self.assertEqual((result.state, transport.urls), ('ok', [JMA_FEED, JMA_TARGET]))
+
+    def test_without_a_saved_url_the_s4_interim_still_applies(self):
+        # Same as the S4 row 4 boundary: the held analysis time stands in for the feed time.
+        held = known(datetime(2026, 11, 11, 3, tzinfo=UTC), active=False)
+        routes = {JMA_FEED: feed(extra=('2026-11-11T06:30:01Z',)), JMA_TARGET: 404, JMA_LONG: feed()}
+        _, transport = self.fetch(routes, held, now=datetime(2026, 11, 11, 7, tzinfo=UTC))
+        self.assertIn(JMA_LONG, transport.urls)
+
+    def test_other_bulletins_of_the_system_become_extra_track_points(self):
+        routes = dict(tt.cempaka_routes())
+        routes[B0640] = bulletin(analysis='2026-11-11T15:00:00+09:00', report='2026-11-11T15:45:00+09:00',
+                                 coordinate='+28.5+148.6/')
+        result, _ = self.fetch(routes)
+        self.assertEqual([record['analysis_time'] for record in result.records], [T09])
+        self.assertEqual([(p['analysis_time'], p['lat'], p['lon']) for p in result.records[0]['extra_points']],
+                         [('2026-11-11T06:00:00Z', 28.5, 148.6)])
+
+
+def cwa_payload():
+    return json.loads(fixture('cwa_datastore_cempaka.json'))
+
+
+def cwa_entry(payload):
+    return payload['records']['TropicalCyclones']['TropicalCyclone'][0]
+
+
+class CwaDetailTests(unittest.TestCase):
+    def test_real_sample_track_radii_and_forecast(self):
+        record = tropical_cwa.parse_cwa(fixture('cwa_datastore_cempaka.json')).records[0]
+        analysis, forecast = record['analysis'], record['forecast']
+        self.assertEqual(analysis['product_url'], 'https://opendata.cwa.gov.tw/dataset/warning/W-C0034-005')
+        # No separate issue time in the datastore response (11a): the analysis time stands in.
+        self.assertEqual((analysis['issued_at'], analysis['bulletin'], analysis['final']),
+                         ('2026-11-11T06:00:00Z', None, False))
+        track = record['source_track']
+        self.assertEqual(len(track), 21)
+        self.assertEqual(track[0]['analysis_time'], '2026-11-06T00:00:00Z')  # 08:00 +08:00
+        self.assertEqual(track, sorted(track, key=lambda point: point['analysis_time']))
+        fix = analysis['fix']
+        self.assertEqual(fix['movement'], {'direction_deg': None, 'direction_text': 'ENE', 'speed_kt': None, 'speed_kmh': 54})
+        self.assertEqual([item['threshold'] for item in fix['radii']],
+                         [{'value': 25, 'unit': 'm/s'}, {'value': 15, 'unit': 'm/s'}])
+        self.assertEqual([item['dir'] for item in fix['radii'][1]['sectors']], ['NE', 'SE', 'SW', 'NW'])
+        self.assertEqual(forecast['init_time'], '2026-11-11T06:00:00Z')
+        self.assertEqual([(p['tau_h'], p['note']) for p in forecast['points']], [(6, None), (12, 'EXTRATROPICAL')])
+        self.assertEqual(forecast['points'][0]['radii'],
+                         [{'threshold': {'value': 15, 'unit': 'm/s'}, 'unit': 'km', 'sectors': [{'dir': 'ALL', 'radius': 150}]}])
+        self.assertEqual(forecast['points'][0]['probability_circle'], {'radius': 40, 'unit': 'km', 'probability_pct': 70})
+        assert_blocks_valid(self, record)
+
+    def test_track_is_capped_at_160_newest_points(self):
+        payload = cwa_payload()
+        base = cwa_entry(payload)['AnalysisData']['Fix'][0]
+        start = datetime(2026, 10, 1, tzinfo=UTC)
+        cwa_entry(payload)['AnalysisData']['Fix'] = [
+            dict(base, DateTime=(start + hours(3 * n)).isoformat()) for n in range(200)]
+        record = tropical_cwa.parse_cwa(json.dumps(payload).encode()).records[0]
+        self.assertEqual(len(record['source_track']), 160)
+        self.assertEqual(record['source_track'][-1]['analysis_time'], tt.stamp(start + hours(3 * 198)))
+
+    def test_unusable_forecast_drops_only_the_forecast(self):
+        # S6a review finding A: the record (and so the index) must stay as in S4.
+        for label, change in (
+                ('two init times', lambda fixes: fixes[1].update(InitialTime='2026-11-11T20:00:00+08:00')),
+                ('longitude 200', lambda fixes: fixes[0].update(CoordinateLongitude='200.0')),
+                ('tau 0', lambda fixes: fixes[0].update(ForecastHour='0')),
+                ('blank tau', lambda fixes: fixes[0].update(ForecastHour='')),
+                ('missing latitude', lambda fixes: fixes[0].pop('CoordinateLatitude')),
+                ('gust 300', lambda fixes: fixes[0].update(MaxGustSpeed='300')),
+                ('25 points', lambda fixes: fixes.extend(dict(fixes[0], ForecastHour=str(n)) for n in range(20, 43)))):
+            with self.subTest(label):
+                payload = cwa_payload()
+                change(cwa_entry(payload)['ForecastData']['Fix'])
+                result = tropical_cwa.parse_cwa(json.dumps(payload).encode())
+                self.assertEqual((result.state, len(result.records)), ('ok', 1))
+                self.assertIsNone(result.records[0]['forecast'])
+                self.assertEqual(result.records[0]['analysis']['fix']['lat'], 28.9)
+
+    def test_odd_radii_and_past_points_are_left_out(self):
+        def fix(payload):
+            return cwa_entry(payload)['AnalysisData']['Fix']
+        for label, change, radii, track in (
+                ('quadrant N', lambda p: fix(p)[-1]['Circle15ms']['QuadrantRadii']['Radius'][0].update(dir='N'), [25], 21),
+                ('quadrants as dict', lambda p: fix(p)[-1]['Circle25ms']['QuadrantRadii'].update(Radius={'value': 1}),
+                 [15], 21),
+                ('circle as string', lambda p: fix(p)[-1].update(Circle15ms='150'), [25], 21),
+                ('old point without latitude', lambda p: fix(p)[0].pop('CoordinateLatitude'), [25, 15], 20),
+                ('old point at latitude 99', lambda p: fix(p)[1].update(CoordinateLatitude='99'), [25, 15], 20),
+                ('repeated old time', lambda p: fix(p)[1].update(DateTime=fix(p)[0]['DateTime']), [25, 15], 20)):
+            with self.subTest(label):
+                payload = cwa_payload()
+                change(payload)
+                result = tropical_cwa.parse_cwa(json.dumps(payload).encode())
+                self.assertEqual((result.state, len(result.records)), ('ok', 1))
+                record = result.records[0]
+                self.assertEqual([item['threshold']['value'] for item in record['analysis']['fix']['radii']], radii)
+                self.assertEqual(len(record['source_track']), track)
+                assert_blocks_valid(self, record)
+
+
+    def test_missing_forecast_gives_no_forecast_block(self):
+        payload = cwa_payload()
+        cwa_entry(payload).pop('ForecastData')
+        record = tropical_cwa.parse_cwa(json.dumps(payload).encode()).records[0]
+        self.assertIsNone(record['forecast'])
+
+
 if __name__ == '__main__':
     unittest.main()

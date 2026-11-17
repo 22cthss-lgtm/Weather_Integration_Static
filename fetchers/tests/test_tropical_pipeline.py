@@ -286,6 +286,95 @@ class IsolationTests(unittest.TestCase):
             validate_state(json.dumps(after['scheduler_state']).encode(), after['content_id'], NOW + timedelta(minutes=2))
 
 
+STORM_ANALYSIS = 'tropical/official/storms/2026-jma-tc2638/analysis.json'
+STORM_FORECAST = 'tropical/official/storms/2026-jma-tc2638/forecast.json'
+
+
+class StormFilePipelineTests(unittest.TestCase):
+    """analysis.json / forecast.json through checked_update and run_candidate (design.md 5.2, 5.5, 11b #1)."""
+
+    def first(self, root):
+        sha = package(root)['sha256']
+        tasks = subset('sst', 'tropical_official')
+        cempaka = tropical_ok(tt.cempaka_routes(), now=tt.NOW)
+        result = prepare(root, 'first', make_update(cempaka), tasks=tasks, sha=sha)
+        return result, tasks
+
+    def test_storm_files_are_published_unhashed_in_their_own_layout(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            result, _ = self.first(root)
+            seed_files, _ = read_resources(root / 'seed/data')
+            self.assertEqual(result['checks']['tropical_official']['state'], 'updated')
+            files, _ = read_resources(root / 'first/site-data')
+            for name in (OFFICIAL_INDEX_PATH, STORM_ANALYSIS, STORM_FORECAST):
+                self.assertIn(name, files)
+                self.assertEqual(result['resources'][name]['state'], 'updated')
+                # atomic_write_json layout, untouched by the image hash rewrite.
+                self.assertEqual(files[name], (json.dumps(json.loads(files[name]), ensure_ascii=False, indent=2)
+                                               + '\n').encode('utf-8'))
+            self.assertEqual({k: v for k, v in files.items() if not k.startswith('tropical/')}, seed_files)
+            self.assertFalse(any(name.startswith('tropical/') for name in keep_hashes.seen))
+            self.assertEqual(result['content']['image_hashes'], {})
+            self.assertNotIn(SECRET, json.dumps(result, ensure_ascii=False))
+
+    def test_rewrite_that_only_changes_fetched_at_is_discarded(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            first, tasks = self.first(root)
+            saved = {name: (root / 'first/site-data' / name).read_bytes() for name in (STORM_ANALYSIS, STORM_FORECAST)}
+            again = tropical_ok(tt.cempaka_routes(), now=tt.NOW + timedelta(seconds=40))
+            result = prepare(root, 'again', make_update(again), tasks=tasks, now=NOW + timedelta(seconds=40),
+                             sha=first['sha256'], archive=root / 'first/output/weather-snapshot.zip')
+            # (The index itself changes here: match "name" becomes "id" on the second run, 11a.)
+            for name, content in saved.items():
+                self.assertEqual((root / 'again/site-data' / name).read_bytes(), content)
+                self.assertEqual(result['resources'][name]['state'], 'retained')
+
+    def test_write_failure_rolls_back_the_whole_prefix_and_spares_images(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            first, tasks = self.first(root)
+            archive = root / 'first/output/weather-snapshot.zip'
+            before = {name: (root / 'first/site-data' / name).read_bytes()
+                      for name in (OFFICIAL_INDEX_PATH, STORM_ANALYSIS, STORM_FORECAST)}
+            real = official.atomic_write_json
+
+            def failing(data, path, prefix):
+                if Path(path).name == 'forecast.json':
+                    raise OSError('disk full')
+                return real(data, path, prefix=prefix)
+            later = tropical_ok(tt.cempaka_routes(), now=tt.NOW + timedelta(hours=1))
+            with patch.object(official, 'atomic_write_json', failing):
+                result = prepare(root, 'second', make_update(later, change=('sst',)), tasks=tasks,
+                                 now=NOW + timedelta(hours=1), sha=first['sha256'], archive=archive)
+            self.assertEqual(result['checks']['tropical_official']['state'], 'retained_after_failure')
+            self.assertTrue(result['deploy'])  # the image change still ships
+            for name, content in before.items():
+                self.assertEqual((root / 'second/site-data' / name).read_bytes(), content, name)
+            files, _ = read_resources(root / 'second/site-data')
+            self.assertIn(' changed', json.loads(files['images/sst/latest.json'])['title'])
+
+    def test_invalid_storm_file_on_disk_rolls_the_prefix_back(self):
+        def writes_bad_storm_file(kind, images):
+            index = official.update_tropical_official(
+                Path(images).parent, now=tt.NOW, transport=FakeTransport(tt.cempaka_routes()),
+                wait=lambda seconds: None, clock=lambda: 0.0, api_key=SECRET, policy=quiet_policy())
+            (Path(images).parent / STORM_FORECAST).write_text('{"schema_version": 1}', encoding='utf-8')
+            return index
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            sha = package(root, tropical=tt.no_storm_index(NOW - timedelta(hours=1)))['sha256']
+            before = (root / 'seed/data' / OFFICIAL_INDEX_PATH).read_bytes()
+            result = prepare(root, 'work', make_update(writes_bad_storm_file, change=('sst',)),
+                             tasks=subset('sst', 'tropical_official'), sha=sha)
+            self.assertEqual(result['checks']['tropical_official']['state'], 'retained_after_failure')
+            files, _ = read_resources(root / 'work/site-data')
+            self.assertEqual(files[OFFICIAL_INDEX_PATH], before)
+            self.assertFalse(any('/storms/' in name for name in files))
+            self.assertTrue(result['deploy'])
+
+
 CONTENT = {'content_id': 'a' * 64, 'content_created_at': '2026-11-02T10:00:00+00:00'}
 ONLINE = {'state': 'verified', 'marker': {'content_id': 'b' * 64}, 'content_created_at': '2026-11-02T09:00:00+00:00'}
 OK, FAILED, IDLE = {'state': 'checked_unchanged'}, {'state': 'retained_after_failure'}, {'state': 'not_due'}

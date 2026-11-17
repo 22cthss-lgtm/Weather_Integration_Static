@@ -220,3 +220,215 @@ def validate_official_index(data):
     except Exception:  # noqa: BLE001 - see module docstring: nothing else may escape.
         raise ValueError('Invalid tropical official index') from None
     return data
+
+
+# ---------------------------------------------------------------------------
+# Per-storm files (design.md 1.4, 1.5, 4.1 and 11b).
+
+STORM_FILE = re.compile(r'tropical/official/storms/([0-9]{4}-(?:jma|jtwc|cwa)-[a-z0-9]{1,8})/(analysis|forecast)\.json')
+MAX_PAST_TRACK = 160
+MAX_FORECAST_POINTS = 24
+MAX_TAU_H = 240
+MAX_RADII = 4
+MAX_RADIUS = 2000
+MAX_URL = 300
+SECTOR_DIRS = ('NE', 'SE', 'SW', 'NW', 'N', 'E', 'S', 'W', 'ALL')
+COMPASS_16 = ('N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+              'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW')
+DIRECTION_TEXT = COMPASS_16 + ('STNR', 'VAR')
+NOTES = ('DISSIPATING', 'DISSIPATED', 'EXTRATROPICAL', 'POST_TROPICAL')
+BULLETIN = re.compile(r'[0-9A-Za-z]{1,8}')
+CWA_DATASET_PAGE = 'https://opendata.cwa.gov.tw/dataset/warning/W-C0034-005'
+PRODUCT_URL = {
+    'jtwc': re.compile(r'https://www\.metoc\.navy\.mil/jtwc/products/[A-Za-z0-9_.-]{1,80}'),
+    'jma': re.compile(r'https://www\.data\.jma\.go\.jp/developer/xml/data/[0-9]{14}_[0-9]+_VPTW60_[0-9]{6}\.xml'),
+    'cwa': re.compile(re.escape(CWA_DATASET_PAGE)),
+}
+GRAPHIC_URL = {'jtwc': re.compile(r'https://www\.metoc\.navy\.mil/jtwc/products/[A-Za-z0-9_.-]{1,80}\.gif')}
+PAST_ORIGIN = {'jtwc': 'accumulated', 'jma': 'accumulated', 'cwa': 'source'}
+# Units each agency really provides (design.md 1.2, 1.4); nothing is converted.
+RADII_UNITS = {'jtwc': ('kt', 'nm'), 'jma': ('kt', 'nm'), 'cwa': ('m/s', 'km')}
+MOVEMENT_FIELDS = {'jtwc': ('direction_deg', 'speed_kt'), 'jma': ('direction_text', 'speed_kt', 'speed_kmh'),
+                   'cwa': ('direction_text', 'speed_kmh')}
+
+
+def _url(value, pattern):
+    if type(value) is not str or len(value) > MAX_URL or not pattern.fullmatch(value):
+        _fail('Invalid URL field')
+
+
+def _gust(agency, value):
+    if value is None:
+        return
+    _exact(value, ('kt', 'ms'))
+    _number(value['kt'], 0, 250, optional=True)
+    _number(value['ms'], 0, 250, optional=True)
+    if value['kt'] is None and value['ms'] is None:
+        _fail('Empty gust')
+    if (agency == 'jtwc' and value['ms'] is not None) or (agency == 'cwa' and value['kt'] is not None):
+        _fail('Gust unit not provided by this agency')
+
+
+def _movement(agency, value):
+    if value is None:
+        return
+    _exact(value, ('direction_deg', 'direction_text', 'speed_kt', 'speed_kmh'))
+    degree = value['direction_deg']
+    if degree is not None and (type(degree) is not int or not 0 <= degree <= 360):
+        _fail('Invalid movement direction')
+    text = value['direction_text']
+    if text is not None and (type(text) is not str or text not in DIRECTION_TEXT):
+        _fail('Invalid movement direction text')
+    _number(value['speed_kt'], 0, 200, optional=True)
+    _number(value['speed_kmh'], 0, 400, optional=True)
+    if all(item is None for item in value.values()):
+        _fail('Empty movement')
+    if any(value[key] is not None for key in value if key not in MOVEMENT_FIELDS[agency]):
+        _fail('Movement form not provided by this agency')
+
+
+def _radii(agency, value):
+    if type(value) is not list or len(value) > MAX_RADII:
+        _fail('Invalid radii')
+    speed_unit, length_unit = RADII_UNITS[agency]
+    thresholds = []
+    for item in value:
+        _exact(item, ('threshold', 'unit', 'sectors'))
+        _exact(item['threshold'], ('value', 'unit'))
+        _number(item['threshold']['value'], 1, 200)
+        if item['threshold']['unit'] != speed_unit or item['unit'] != length_unit:
+            _fail('Radii unit not provided by this agency')
+        thresholds.append(item['threshold']['value'])
+        sectors = item['sectors']
+        if type(sectors) is not list or not 1 <= len(sectors) <= len(SECTOR_DIRS):
+            _fail('Invalid radii sectors')
+        dirs = []
+        for sector in sectors:
+            _exact(sector, ('dir', 'radius'))
+            if type(sector['dir']) is not str or sector['dir'] not in SECTOR_DIRS:
+                _fail('Invalid sector direction')
+            _number(sector['radius'], 0, MAX_RADIUS, optional=True)
+            dirs.append(sector['dir'])
+        if len(set(dirs)) != len(dirs):
+            _fail('Duplicate sector direction')
+    if len(set(thresholds)) != len(thresholds):
+        _fail('Duplicate radii threshold')
+
+
+def _position(agency, value, fields):
+    """Shared fields of fixes, past points and forecast points; returns nothing."""
+    _exact(value, fields)
+    _number(value['lat'], -90, 90)
+    _number(value['lon'], -180, 180, high_exclusive=True)
+    _text(value['category'], optional=True)
+    if agency == 'cwa' and value['category'] is not None:
+        _fail('CWA provides no category')
+    _max_wind(agency, value['max_wind'])
+    _number(value['pressure_hpa'], 850, 1100, optional=True)
+
+
+FIX_FIELDS = ('analysis_time', 'lat', 'lon', 'category', 'max_wind', 'gust', 'pressure_hpa', 'movement', 'radii')
+PAST_FIELDS = ('analysis_time', 'lat', 'lon', 'category', 'max_wind', 'pressure_hpa')
+POINT_FIELDS = ('tau_h', 'valid_time', 'lat', 'lon', 'category', 'max_wind', 'gust', 'pressure_hpa',
+                'probability_circle', 'radii', 'note')
+
+
+def _bulletin(value):
+    if value is not None and (type(value) is not str or not BULLETIN.fullmatch(value)):
+        _fail('Invalid bulletin')
+
+
+def _analysis_agency(agency, value):
+    _exact(value, ('product_url', 'graphic_url', 'issued_at', 'bulletin', 'final', 'fix',
+                   'past_track_origin', 'past_track'))
+    _url(value['product_url'], PRODUCT_URL[agency])
+    if value['graphic_url'] is not None:
+        if agency not in GRAPHIC_URL:
+            _fail('No graphic for this agency')
+        _url(value['graphic_url'], GRAPHIC_URL[agency])
+    parse_stamp(value['issued_at'])
+    _bulletin(value['bulletin'])
+    if type(value['final']) is not bool or (agency == 'cwa' and value['final']):
+        _fail('Invalid final flag')
+    fix = value['fix']
+    _position(agency, fix, FIX_FIELDS)
+    fix_time = parse_stamp(fix['analysis_time'])
+    _gust(agency, fix['gust'])
+    _movement(agency, fix['movement'])
+    _radii(agency, fix['radii'])
+    if value['past_track_origin'] != PAST_ORIGIN[agency]:
+        _fail('Invalid past track origin')
+    track = value['past_track']
+    if type(track) is not list or len(track) > MAX_PAST_TRACK:
+        _fail('Invalid past track')
+    previous = None
+    for point in track:
+        _position(agency, point, PAST_FIELDS)
+        moment = parse_stamp(point['analysis_time'])
+        if (previous is not None and moment <= previous) or moment >= fix_time:
+            _fail('Past track must increase and precede the fix')
+        previous = moment
+
+
+def _forecast_agency(agency, value):
+    _exact(value, ('product_url', 'issued_at', 'bulletin', 'init_time', 'points'))
+    _url(value['product_url'], PRODUCT_URL[agency])
+    parse_stamp(value['issued_at'])
+    _bulletin(value['bulletin'])
+    init = parse_stamp(value['init_time'])
+    points = value['points']
+    if type(points) is not list or len(points) > MAX_FORECAST_POINTS:
+        _fail('Invalid forecast points')
+    previous = 0
+    for point in points:
+        _position(agency, point, POINT_FIELDS)
+        tau = point['tau_h']
+        if type(tau) is not int or not 1 <= tau <= MAX_TAU_H or tau <= previous:
+            _fail('Invalid tau_h')
+        previous = tau
+        if parse_stamp(point['valid_time']) != init + timedelta(hours=tau):
+            _fail('valid_time must equal init_time + tau_h')
+        _gust(agency, point['gust'])
+        circle = point['probability_circle']
+        if circle is not None:
+            if agency == 'jtwc':
+                _fail('JTWC provides no probability circle')
+            _exact(circle, ('radius', 'unit', 'probability_pct'))
+            _number(circle['radius'], 0, MAX_RADIUS)
+            if circle['unit'] not in ('nm', 'km'):
+                _fail('Invalid probability circle unit')
+            if type(circle['probability_pct']) is not int or not 1 <= circle['probability_pct'] <= 100:
+                _fail('Invalid probability')
+        _radii(agency, point['radii'])
+        if point['note'] is not None and (type(point['note']) is not str or point['note'] not in NOTES):
+            _fail('Invalid note')
+
+
+def _storm_file(path, data):
+    matched = STORM_FILE.fullmatch(path) if type(path) is str else None
+    if not matched:
+        _fail('Not a tropical storm file path')
+    _exact(data, ('schema_version', 'cyclone_id', 'fetched_at', 'agencies'))
+    if type(data['schema_version']) is not int or data['schema_version'] != 1:
+        _fail('Unsupported tropical schema version')
+    if data['cyclone_id'] != matched[1]:
+        _fail('cyclone_id does not match the path')
+    parse_stamp(data['fetched_at'])
+    _exact(data['agencies'], AGENCIES)
+    check = _analysis_agency if matched[2] == 'analysis' else _forecast_agency
+    for agency in AGENCIES:
+        if data['agencies'][agency] is not None:
+            check(agency, data['agencies'][agency])
+
+
+def is_storm_file(path):
+    return type(path) is str and STORM_FILE.fullmatch(path) is not None
+
+
+def validate_storm_file(path, data):
+    """Validate ``analysis.json`` or ``forecast.json`` for the storm named in ``path``."""
+    try:
+        _storm_file(path, data)
+    except Exception:  # noqa: BLE001 - only ValueError may leave a tropical validator.
+        raise ValueError('Invalid tropical storm file') from None
+    return data

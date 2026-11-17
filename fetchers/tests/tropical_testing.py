@@ -167,6 +167,86 @@ def valid_index():
                         'pressure_hpa': 975}}}]})
 
 
+ANALYSIS_PATH = 'tropical/official/storms/2026-jma-tc2638/analysis.json'
+FORECAST_PATH = 'tropical/official/storms/2026-jma-tc2638/forecast.json'
+
+
+def _sectors(*values):
+    return [{'dir': direction, 'radius': value} for direction, value in zip(('NE', 'SE', 'SW', 'NW'), values)]
+
+
+def valid_analysis():
+    """design.md 1.4 with all three agencies, values from the 2026-11-11 samples."""
+    return deepcopy({
+        'schema_version': 1, 'cyclone_id': '2026-jma-tc2638', 'fetched_at': '2026-11-11T10:33:07Z',
+        'agencies': {
+            'jtwc': {
+                'product_url': 'https://www.metoc.navy.mil/jtwc/products/wp3126.tcw',
+                'graphic_url': 'https://www.metoc.navy.mil/jtwc/products/wp3126.gif',
+                'issued_at': '2026-11-11T09:00:00Z', 'bulletin': '021', 'final': False,
+                'fix': {'analysis_time': '2026-11-11T06:00:00Z', 'lat': 29.1, 'lon': 150.2, 'category': 'TYPHOON',
+                        'max_wind': {'kt': 65, 'ms': None, 'averaging_min': 1}, 'gust': {'kt': 80, 'ms': None},
+                        'pressure_hpa': 983,
+                        'movement': {'direction_deg': 70, 'direction_text': None, 'speed_kt': 33, 'speed_kmh': None},
+                        'radii': [{'threshold': {'value': 34, 'unit': 'kt'}, 'unit': 'nm',
+                                   'sectors': _sectors(100, 105, 95, None)}]},
+                'past_track_origin': 'accumulated',
+                'past_track': [{'analysis_time': '2026-11-11T00:00:00Z', 'lat': 27.9, 'lon': 147.0,
+                                'category': 'TYPHOON', 'max_wind': {'kt': 70, 'ms': None, 'averaging_min': 1},
+                                'pressure_hpa': None}]},
+            'jma': {
+                'product_url': JMA_BULLETIN.format('20261111094118'), 'graphic_url': None,
+                'issued_at': '2026-11-11T09:45:00Z', 'bulletin': '52', 'final': False,
+                'fix': {'analysis_time': '2026-11-11T09:00:00Z', 'lat': 29.2, 'lon': 151.0, 'category': 'STS',
+                        'max_wind': {'kt': 60, 'ms': 30, 'averaging_min': 10}, 'gust': {'kt': 85, 'ms': 45},
+                        'pressure_hpa': 985,
+                        'movement': {'direction_deg': None, 'direction_text': 'ENE', 'speed_kt': 27, 'speed_kmh': 50},
+                        'radii': [{'threshold': {'value': 50, 'unit': 'kt'}, 'unit': 'nm',
+                                   'sectors': [{'dir': 'ALL', 'radius': 60}]}]},
+                'past_track_origin': 'accumulated', 'past_track': []},
+            'cwa': {
+                'product_url': 'https://opendata.cwa.gov.tw/dataset/warning/W-C0034-005', 'graphic_url': None,
+                'issued_at': '2026-11-11T06:00:00Z', 'bulletin': None, 'final': False,
+                'fix': {'analysis_time': '2026-11-11T06:00:00Z', 'lat': 28.9, 'lon': 149.9, 'category': None,
+                        'max_wind': {'kt': None, 'ms': 30, 'averaging_min': 10}, 'gust': {'kt': None, 'ms': 38},
+                        'pressure_hpa': 975,
+                        'movement': {'direction_deg': None, 'direction_text': 'ENE', 'speed_kt': None, 'speed_kmh': 54},
+                        'radii': [{'threshold': {'value': 15, 'unit': 'm/s'}, 'unit': 'km',
+                                   'sectors': _sectors(180, 120, 120, 160)}]},
+                'past_track_origin': 'source',
+                'past_track': [{'analysis_time': '2026-11-11T00:00:00Z', 'lat': 27.5, 'lon': 147.6, 'category': None,
+                                'max_wind': {'kt': None, 'ms': 30, 'averaging_min': 10}, 'pressure_hpa': 975}]}}})
+
+
+def valid_forecast():
+    """design.md 1.5 with all three agencies; crosses a day and 180 degrees."""
+    def point(tau, valid, lat, lon, **extra):
+        base = {'tau_h': tau, 'valid_time': valid, 'lat': lat, 'lon': lon, 'category': None, 'max_wind': None,
+                'gust': None, 'pressure_hpa': None, 'probability_circle': None, 'radii': [], 'note': None}
+        base.update(extra)
+        return base
+    return deepcopy({
+        'schema_version': 1, 'cyclone_id': '2026-jma-tc2638', 'fetched_at': '2026-11-11T10:33:07Z',
+        'agencies': {
+            'jtwc': {'product_url': 'https://www.metoc.navy.mil/jtwc/products/wp3126.tcw',
+                     'issued_at': '2026-11-11T09:00:00Z', 'bulletin': '021', 'init_time': '2026-11-11T06:00:00Z',
+                     'points': [point(12, '2026-11-11T18:00:00Z', 31.2, 157.0,
+                                      max_wind={'kt': 55, 'ms': None, 'averaging_min': 1}, note='DISSIPATING'),
+                                point(36, '2026-11-12T18:00:00Z', 10.2, -180.0, note='POST_TROPICAL')]},
+            'jma': {'product_url': JMA_BULLETIN.format('20261111094118'), 'issued_at': '2026-11-11T09:45:00Z',
+                    'bulletin': '52', 'init_time': '2026-11-11T09:00:00Z',
+                    'points': [point(24, '2026-11-12T09:00:00Z', 37.6, 168.7, category='LOW', pressure_hpa=992,
+                                     max_wind={'kt': 55, 'ms': 30, 'averaging_min': 10}, gust={'kt': 80, 'ms': 40},
+                                     probability_circle={'radius': 120, 'unit': 'km', 'probability_pct': 70})]},
+            'cwa': {'product_url': 'https://opendata.cwa.gov.tw/dataset/warning/W-C0034-005',
+                    'issued_at': '2026-11-11T06:00:00Z', 'bulletin': None, 'init_time': '2026-11-11T06:00:00Z',
+                    'points': [point(6, '2026-11-11T12:00:00Z', 30.2, 153.7,
+                                     probability_circle={'radius': 40, 'unit': 'km', 'probability_pct': 70},
+                                     radii=[{'threshold': {'value': 15, 'unit': 'm/s'}, 'unit': 'km',
+                                             'sectors': [{'dir': 'ALL', 'radius': 150}]}],
+                                     note='EXTRATROPICAL')]}}})
+
+
 def no_storm_index(moment=NOW):
     source = {'state': 'ok', 'error_code': None, 'last_ok_at': minute(moment), 'active_count': 0}
     return {'schema_version': 1, 'basin': 'WP', 'status': 'OK_NO_STORMS', 'fetched_at': stamp(moment),

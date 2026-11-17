@@ -4,6 +4,7 @@ Failures are reduced to fixed codes here. No exception text, URL or response
 body may travel further: a CWA request URL contains the API key.
 """
 from dataclasses import dataclass, field
+from datetime import timezone
 import re
 import time
 from types import SimpleNamespace
@@ -142,4 +143,51 @@ def make_record(agency, *, key, season, ids, name, analysis_time, lat, lon, cate
     return {'agency': agency, 'key': key, 'season': season, 'ids': ids, 'name': name,
             'name_zh': name_zh, 'origin_basin': origin_basin, 'analysis_time': analysis_time,
             'lat': lat, 'lon': lon, 'category': category, 'max_wind': max_wind,
-            'pressure_hpa': pressure_hpa, 'ended': ended, 'in_scope': in_scope}
+            'pressure_hpa': pressure_hpa, 'ended': ended, 'in_scope': in_scope,
+            # Per-storm file content (design.md 1.4, 1.5). Parsers fill these;
+            # ``analysis`` has no past_track: tropical_official assembles it.
+            'analysis': None, 'forecast': None, 'source_track': None, 'extra_points': []}
+
+
+def stamp(moment):
+    """UTC, seconds, trailing Z (design.md 1.2)."""
+    return moment.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def past_point(record):
+    """The subset of a fix kept in past_track."""
+    return {'analysis_time': stamp(record['analysis_time']), 'lat': record['lat'], 'lon': record['lon'],
+            'category': record['category'], 'max_wind': record['max_wind'],
+            'pressure_hpa': record['pressure_hpa']}
+
+
+def optional(build, default=None):
+    """Per-storm file extras never fail the record the index needs (S6a review finding A).
+
+    Radii, movement, gusts, past and forecast points are optional content: when
+    one cannot be read it is left out, and the summary record stays usable.
+    """
+    try:
+        return build()
+    except Exception:  # noqa: BLE001 - any parse problem means "not available".
+        return default
+
+
+COMPASS_16 = ('N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+              'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW')
+
+
+def note_of(text):
+    """Fixed vocabulary for forecast notes (design.md 1.5, 11b #9); anything else is None."""
+    if not isinstance(text, str):
+        return None
+    text = text.upper()
+    if 'POST-TROP' in text:
+        return 'POST_TROPICAL'
+    if 'BECOMING EXTRATROPICAL' in text:
+        return 'EXTRATROPICAL'
+    if 'DISSIPATED' in text:
+        return 'DISSIPATED'
+    if 'DISSIPATING' in text:
+        return 'DISSIPATING'
+    return None
