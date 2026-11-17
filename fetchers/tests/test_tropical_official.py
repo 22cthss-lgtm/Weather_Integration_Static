@@ -7,11 +7,13 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import io
 import json
+import math
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import requests
 
@@ -263,12 +265,14 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual([storm['cyclone_id'] for storm in named['storms']], ['2026-jma-tc2638'])
         self.assertEqual((named['storms'][0]['name'], named['storms'][0]['ids']['jtwc']), ('CEMPAKA', '31W'))
 
-    def test_name_comparison_ignores_case_and_punctuation_but_not_season(self):
+    def test_name_comparison_ignores_case_and_punctuation_and_allows_one_season_apart(self):
         sources = dict(jma=result(record('jma', when=RECENT, name='KONG-REY')),
                        jtwc=result(record('jtwc', when=RECENT, name='KONG REY')))
         self.assertEqual(len(build(None, **sources)['storms']), 1)
-        sources['jtwc'] = result(record('jtwc', when=RECENT, name='KONG REY', season=2027))
-        self.assertEqual(len(build(None, **sources)['storms']), 2)
+        # design.md 11c #7: the next season still matches by name; two seasons apart does not.
+        for season, expected in ((2027, 1), (2025, 1), (2028, 2)):
+            sources['jtwc'] = result(record('jtwc', when=RECENT, name='KONG REY', season=season))
+            self.assertEqual(len(build(None, **sources)['storms']), expected, season)
 
     def test_same_name_too_far_apart_is_not_merged(self):
         self.assertAlmostEqual(official.distance_km(0, 0, 0, 1), 111.19, places=1)
@@ -279,15 +283,26 @@ class MatchingTests(unittest.TestCase):
                    jtwc=result(record('jtwc', when=RECENT, lat=20.0, lon=145.0)))    # about 1565 km
         self.assertEqual([s['cyclone_id'] for s in build(None, **far)['storms']], ['2026-jma-tc2638', '2026-jtwc-31w'])
 
-    def test_unnamed_systems_stay_separate_until_position_matching_exists(self):
-        sources = all_three(name=None)
-        index = build(None, **sources)
-        self.assertEqual([s['cyclone_id'] for s in index['storms']], ['2026-cwa-td35', '2026-jma-tc2638', '2026-jtwc-31w'])
-        self.assertTrue(all(sum(v is not None for v in s['summary'].values()) == 1 for s in index['storms']))
-        # Once separate they are never merged automatically, even after both get the same name.
+    def test_unnamed_records_at_one_place_join_by_position(self):
+        # S4 kept these apart (no rule 3 yet); S6b joins them (design.md 2.3 rule 3).
+        index = build(None, **all_three(name=None))
+        storm, = index['storms']
+        self.assertEqual(storm['cyclone_id'], '2026-jma-tc2638')
+        self.assertEqual(storm['match'], {'jtwc': 'position', 'jma': 'origin', 'cwa': 'position'})
         later = build(index, NOW + hours(1), **all_three(when=NOW))
-        self.assertEqual(len(later['storms']), 3)
+        self.assertEqual(later['storms'][0]['match'], {'jtwc': 'id', 'jma': 'origin', 'cwa': 'id'})
+
+    def test_systems_once_separate_stay_separate_after_naming_and_meeting(self):
+        far = dict(jma=result(record('jma', when=RECENT, name=None, lat=20.0)),
+                   jtwc=result(record('jtwc', when=RECENT, name=None, lat=25.0)))
+        index = build(None, **far)
+        self.assertEqual([s['cyclone_id'] for s in index['storms']], ['2026-jma-tc2638', '2026-jtwc-31w'])
+        # Same place and same name later: rule 1 keeps each binding; never merged automatically.
+        later = build(index, NOW + hours(1), **all_three(when=NOW))
+        self.assertEqual([s['cyclone_id'] for s in later['storms']], ['2026-jma-tc2638', '2026-jtwc-31w'])
         self.assertEqual({s['name'] for s in later['storms']}, {'CEMPAKA'})
+        # Unnamed CWA data next to both: ambiguous, so it becomes a third system.
+        self.assertEqual(len(build(index, NOW + hours(1), **all_three(when=NOW, name=None))['storms']), 3)
 
     def test_two_records_of_one_agency_never_share_a_system(self):
         twin = record('jtwc', when=RECENT, number='32W', lat=29.5)
@@ -362,6 +377,285 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(one, two)
         ids = [s['cyclone_id'] for s in one['storms']]
         self.assertEqual(ids, sorted(ids))
+
+
+KM_PER_DEGREE = math.pi * official.EARTH_RADIUS_KM / 180  # along a meridian
+
+
+def north(km, lat=20.0):
+    return lat + km / KM_PER_DEGREE
+
+
+def flat_km(lat1, lon1, lat2, lon2):
+    """Exact test metric for threshold equality: 100 km per degree of latitude."""
+    return abs(lat2 - lat1) * 100
+
+
+def ids_of(index):
+    return [s['cyclone_id'] for s in index['storms']]
+
+
+class PositionMatchingTests(unittest.TestCase):
+    """Rule 3 (design.md 2.3, 11b #5, 11c); thresholds are [初值] named constants."""
+
+    def test_constants_are_the_design_initial_values(self):
+        self.assertEqual((official.POSITION_BASE_KM, official.POSITION_SPEED_KMH, official.POSITION_MAX_GAP),
+                         (150.0, 60.0, hours(6)))
+
+    def test_real_samples_without_names_still_make_one_system(self):
+        # CEMPAKA 2026-11-11: JTWC 06Z 29.1N 150.2E and CWA 06Z 28.9N 149.9E against
+        # JMA 09Z 29.2N 151.0E: 3 h apart, 78 and 112 km, D = 330 km.
+        found = official.collect(None, NOW, transport=FakeTransport(tt.cempaka_routes()), wait=lambda s: None,
+                                 clock=lambda: 0.0, api_key=SECRET, policy=quiet_policy())
+        for source in found.values():
+            for item in source.records:
+                item['name'] = None
+        index = validate_official_index(official.build_index(None, found, NOW))
+        storm, = index['storms']
+        self.assertEqual(storm['cyclone_id'], '2026-jma-tc2638')
+        self.assertEqual(storm['match'], {'jtwc': 'position', 'jma': 'origin', 'cwa': 'position'})
+        self.assertEqual((storm['ids']['jtwc'], storm['ids']['cwa_td']), ('31W', '35'))
+
+    def test_distance_threshold_both_sides(self):
+        for km, expected in ((149.0, ['2026-jma-tc2638']), (151.0, ['2026-jma-tc2638', '2026-jtwc-31w'])):
+            with self.subTest(km=km):
+                index = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0)),
+                              jtwc=result(record('jtwc', when=RECENT, name=None, lat=north(km))))
+                self.assertEqual(ids_of(index), expected)
+
+    def test_exactly_d_joins_and_d_grows_with_the_time_gap(self):
+        with patch.object(official, 'distance_km', flat_km):
+            # 0 h: D = 150; exactly D joins.
+            for lat, expected in ((21.5, 1), (21.51, 2)):
+                index = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0)),
+                              jtwc=result(record('jtwc', when=RECENT, name=None, lat=lat)))
+                self.assertEqual(len(index['storms']), expected, lat)
+            # 2.5 h apart: D = 300.
+            for lat, expected in ((23.0, 1), (23.01, 2)):
+                index = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0)),
+                              jtwc=result(record('jtwc', when=RECENT - hours(2.5), name=None, lat=lat)))
+                self.assertEqual(len(index['storms']), expected, lat)
+
+    def test_time_gap_of_six_hours_both_sides(self):
+        with patch.object(official, 'distance_km', flat_km):
+            for gap, expected in ((hours(6), 1), (hours(6) + timedelta(seconds=1), 2)):
+                with self.subTest(gap=gap):
+                    # 400 km is inside D(6 h) = 510; the gap alone decides.
+                    index = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0)),
+                                  cwa=result(record('cwa', when=RECENT - gap, name=None, lat=24.0)))
+                    self.assertEqual(len(index['storms']), expected)
+
+    def test_second_system_within_2d_blocks_and_exactly_2d_counts_as_within(self):
+        with patch.object(official, 'distance_km', flat_km):
+            # A at 20.0, the JTWC record 100 km away at 21.0, B 300 km (= 2D) or 301 km away.
+            for b_lat, expected in ((24.0, ['2026-jma-tc2638', '2026-jma-tc2639', '2026-jtwc-31w']),
+                                    (24.01, ['2026-jma-tc2638', '2026-jma-tc2639'])):
+                with self.subTest(b_lat=b_lat):
+                    index = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0),
+                                                   record('jma', when=RECENT, name=None, lat=b_lat, number='TC2639')),
+                                  jtwc=result(record('jtwc', when=RECENT, name=None, lat=21.0)))
+                    self.assertEqual(ids_of(index), expected)
+
+    def test_two_systems_within_d_join_neither(self):
+        index = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0),
+                                       record('jma', when=RECENT, name=None, lat=north(200), number='TC2639')),
+                      jtwc=result(record('jtwc', when=RECENT, name=None, lat=north(100))))
+        self.assertEqual(ids_of(index), ['2026-jma-tc2638', '2026-jma-tc2639', '2026-jtwc-31w'])
+
+    def test_close_twin_systems_each_get_their_own_records(self):
+        # Two systems 700 km apart, each seen by JTWC 50 km off: no cross-talk.
+        index = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0),
+                                       record('jma', when=RECENT, name=None, lat=north(700), number='TC2639')),
+                      jtwc=result(record('jtwc', when=RECENT, name=None, lat=north(50)),
+                                  record('jtwc', when=RECENT, name=None, lat=north(650), number='32W')))
+        self.assertEqual(ids_of(index), ['2026-jma-tc2638', '2026-jma-tc2639'])
+        self.assertEqual([s['ids']['jtwc'] for s in index['storms']], ['31W', '32W'])
+
+    def test_two_records_of_one_agency_near_one_system_both_stay_out(self):
+        jma = result(record('jma', when=RECENT, name=None, lat=20.0))
+        both = build(None, jma=jma, jtwc=result(record('jtwc', when=RECENT, name=None, lat=north(60)),
+                                                record('jtwc', when=RECENT, name=None, lat=north(-60), number='32W')))
+        self.assertEqual(ids_of(both), ['2026-jma-tc2638', '2026-jtwc-31w', '2026-jtwc-32w'])
+        alone = build(None, jma=jma, jtwc=result(record('jtwc', when=RECENT, name=None, lat=north(60))))
+        self.assertEqual(ids_of(alone), ['2026-jma-tc2638'])
+
+    def test_system_holding_this_agency_still_counts_as_a_second_candidate(self):
+        # A = JMA TC2638 + JTWC 31W; B = JMA TC2639 alone, 400 km north of A.
+        first = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0),
+                                       record('jma', when=RECENT, name=None, lat=north(400), number='TC2639')),
+                      jtwc=result(record('jtwc', when=RECENT, name=None, lat=north(50))))
+        self.assertEqual(ids_of(first), ['2026-jma-tc2638', '2026-jma-tc2639'])
+        for km, expected in ((250, '2026-jtwc-32w'), (350, '2026-jma-tc2639')):
+            with self.subTest(km=km):
+                # 32W is 150 km from B; A (ineligible: it has JTWC) is 250 (within 2D) or 350 km away.
+                again = dict(jma=result(record('jma', when=NOW, name=None, lat=20.0),
+                                        record('jma', when=NOW, name=None, lat=north(400), number='TC2639')),
+                             jtwc=result(record('jtwc', when=NOW, name=None, lat=north(50)),
+                                         record('jtwc', when=NOW, name=None, lat=north(km), number='32W')))
+                if km == 350:
+                    again['jma'] = result(record('jma', when=NOW, name=None, lat=20.0),
+                                          record('jma', when=NOW, name=None, lat=north(km + 100), number='TC2639'))
+                later = build(first, NOW + hours(1), **again)
+                holder = next(s['cyclone_id'] for s in later['storms'] if s['ids']['jtwc'] == '32W')
+                self.assertEqual(holder, expected)
+
+    def test_existing_binding_is_not_overturned_by_position(self):
+        first = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0),
+                                       record('jma', when=RECENT, name=None, lat=north(1000), number='TC2639')),
+                      jtwc=result(record('jtwc', when=RECENT, name=None, lat=20.0)))
+        # 31W now sits on top of the other system: it stays where it was bound.
+        later = build(first, NOW + hours(1), jtwc=result(record('jtwc', when=NOW, name=None, lat=north(1000))),
+                      jma=result(record('jma', when=NOW, name=None, lat=20.0),
+                                 record('jma', when=NOW, name=None, lat=north(1000), number='TC2639')))
+        self.assertEqual([s['ids']['jtwc'] for s in later['storms']], ['31W', None])
+
+    def test_both_named_differently_never_join_by_position(self):
+        index = build(None, jma=result(record('jma', when=RECENT, name='ABLE')),
+                      jtwc=result(record('jtwc', when=RECENT, name='BAKER')))
+        self.assertEqual(len(index['storms']), 2)
+
+    def test_named_record_joins_an_unnamed_system_and_names_it(self):
+        index = build(None, jma=result(record('jma', when=RECENT, name=None)),
+                      jtwc=result(record('jtwc', when=RECENT, name='CEMPAKA')))
+        storm, = index['storms']
+        self.assertEqual((storm['name'], storm['match']['jtwc']), ('CEMPAKA', 'position'))
+
+    def test_system_minted_this_run_is_a_candidate_with_one_agency_absent(self):
+        # JMA absent: JTWC mints, CWA joins it by position in the same run.
+        index = build(None, jma=failed(), **{k: v for k, v in all_three(name=None).items() if k != 'jma'})
+        storm, = index['storms']
+        self.assertEqual((storm['cyclone_id'], storm['match']['cwa']), ('2026-jtwc-31w', 'position'))
+        self.assertEqual(index['status'], 'PARTIAL')
+
+    def test_inactive_record_may_join_but_never_mints(self):
+        near = build(None, jma=result(record('jma', when=RECENT, name=None)),
+                     jtwc=result(record('jtwc', when=RECENT, name=None, ended=True)))
+        storm, = near['storms']
+        self.assertEqual((storm['match']['jtwc'], storm['summary']['jtwc']['active']), ('position', False))
+        far = build(None, jma=result(record('jma', when=RECENT, name=None, lat=10.0)),
+                    jtwc=result(record('jtwc', when=RECENT, name=None, ended=True)))
+        self.assertEqual(ids_of(far), ['2026-jma-tc2638'])
+
+    def test_out_of_scope_record_is_not_matched_by_position(self):
+        index = build(None, jma=result(record('jma', when=RECENT, name=None)),
+                      jtwc=result(record('jtwc', when=RECENT, name=None, in_scope=False)))
+        self.assertEqual(index['storms'][0]['summary']['jtwc'], None)
+
+    def test_distance_across_180_degrees(self):
+        self.assertLess(official.distance_km(10.0, 179.6, 10.0, -179.6), 90)
+        self.assertAlmostEqual(official.distance_km(10.0, 179.6, 10.0, -179.6),
+                               official.distance_km(10.0, -179.6, 10.0, 179.6))
+        # PENA-like: JTWC 04C minted west of 180, then tracked east of it (kept, 3.1).
+        first = build(None, jtwc=result(record('jtwc', when=RECENT, name=None, number='04C', lat=10.0,
+                                               lon=179.9, origin_basin='CP')))
+        later_time = NOW + hours(3)
+        later = build(first, later_time,
+                      jtwc=result(record('jtwc', when=later_time - hours(1), name=None, number='04C', lat=10.1,
+                                         lon=-179.6, in_scope=False, origin_basin='CP')),
+                      cwa=result(record('cwa', when=later_time - hours(1), name=None, lat=10.0, lon=179.6)))
+        storm, = later['storms']
+        self.assertEqual((storm['cyclone_id'], storm['match']['cwa']), ('2026-jtwc-04c', 'position'))
+        self.assertEqual(storm['summary']['jtwc']['lon'], -179.6)
+
+    def test_saved_past_track_supplies_known_positions(self):
+        previous = build(None, jma=result(record('jma', when=NOW - hours(1.5), name=None, lat=29.2, lon=151.0)))
+        files = {'2026-jma-tc2638': {'analysis': {'agencies': {
+            'jma': {'fix': {'analysis_time': tt.stamp(NOW - hours(1.5)), 'lat': 29.2, 'lon': 151.0},
+                    'past_track': [{'analysis_time': tt.stamp(NOW - hours(10.5)), 'lat': 27.9, 'lon': 147.0}]},
+            'jtwc': None, 'cwa': None}}, 'forecast': None}}
+        # A CWA report 10 h old, at the old JMA point: 9 h from the summary, 0 h from the past track.
+        cwa = result(record('cwa', when=NOW - hours(10.5), name=None, lat=28.0, lon=147.1))
+        with_files = official.build_index(previous, results(cwa=cwa, jma=result()), NOW, {}, files)
+        self.assertEqual([s['match']['cwa'] for s in with_files['storms']], ['position'])
+        cwa = result(record('cwa', when=NOW - hours(10.5), name=None, lat=28.0, lon=147.1))
+        for missing in (None, {}, {'2026-jma-tc2638': {'analysis': None, 'forecast': None}}):
+            without = official.build_index(previous, results(cwa=cwa, jma=result()), NOW, {}, missing)
+            self.assertEqual(ids_of(without), ['2026-cwa-td35', '2026-jma-tc2638'], missing)
+
+    def test_this_runs_extra_points_are_known_positions(self):
+        jma = record('jma', when=RECENT, name=None, lat=30.0, lon=155.0)
+        jma['extra_points'] = [{'analysis_time': tt.stamp(RECENT - hours(9)), 'lat': 28.0, 'lon': 148.0}]
+        cwa = record('cwa', when=RECENT - hours(9), name=None, lat=28.1, lon=148.0)
+        index = build(None, jma=result(jma), cwa=result(cwa))
+        self.assertEqual(ids_of(index), ['2026-jma-tc2638'])
+
+    def test_across_the_new_year_a_next_season_record_joins_and_stays(self):
+        # JMA numbers it in 2026; CWA first numbers it in 2027 (design.md 11c #1).
+        december = datetime(2026, 12, 31, 22, tzinfo=UTC)
+        first = build(None, december, jma=result(record('jma', when=december - hours(1), name=None, number='TC2650')))
+        january = datetime(2027, 1, 1, 1, tzinfo=UTC)
+        cwa = lambda when: result(record('cwa', when=when, name=None, number='1', season=2027))
+        second = build(first, january, jma=result(record('jma', when=january - hours(1), name=None, number='TC2650')),
+                       cwa=cwa(january - hours(1)))
+        storm, = second['storms']
+        self.assertEqual((storm['cyclone_id'], storm['match']['cwa']), ('2026-jma-tc2650', 'position'))
+        later = january + hours(6)
+        third = build(second, later, jma=result(record('jma', when=later - hours(1), name=None, number='TC2650')),
+                      cwa=cwa(later - hours(1)))
+        storm, = third['storms']
+        self.assertEqual(storm['match']['cwa'], 'id')
+
+    def test_rule_one_allows_one_season_apart_only(self):
+        storm = {'season': 2026, 'ids': {'jtwc': '01W', 'jma_tc': None, 'jma_number': None, 'cwa_ty': None, 'cwa_td': None}}
+        for season, expected in ((2025, True), (2026, True), (2027, True), (2028, False), (2024, False)):
+            self.assertEqual(official._bound(storm, record('jtwc', when=NOW, number='01W', season=season)), expected)
+
+    def test_same_name_two_seasons_apart_is_another_system(self):
+        first = build(None, jma=result(record('jma', when=RECENT, name='CEMPAKA', lat=20.0)))
+        # Same name two seasons apart: neither rule 2 nor rule 3 applies, even at one place.
+        later = build(first, jtwc=result(record('jtwc', when=RECENT, name='CEMPAKA', season=2028, lat=20.0)))
+        self.assertEqual(ids_of(later), ['2026-jma-tc2638', '2028-jtwc-31w'])
+        # Same name, same season, too far apart (1500 km check): also another system.
+        far = build(first, jtwc=result(record('jtwc', when=RECENT, name='CEMPAKA', lat=north(1600))))
+        self.assertEqual(ids_of(far), ['2026-jma-tc2638', '2026-jtwc-31w'])
+
+    def test_named_across_the_new_year_joins_by_name(self):
+        # JMA names it on 12-31 (season 2026); JTWC first reports it on 01-01 as 2027 (11c #7).
+        december = datetime(2026, 12, 31, 22, tzinfo=UTC)
+        first = build(None, december, jma=result(record('jma', when=december - hours(1), name='ABLE', number='TC2650')))
+        january = datetime(2027, 1, 1, 1, tzinfo=UTC)
+        second = build(first, january, jma=result(record('jma', when=january - hours(1), name='ABLE', number='TC2650')),
+                       jtwc=result(record('jtwc', when=january - hours(1), name='ABLE', number='01W', season=2027)))
+        storm, = second['storms']
+        self.assertEqual((storm['cyclone_id'], storm['match']['jtwc'], storm['ids']['jtwc']), ('2026-jma-tc2650', 'name', '01W'))
+        later = january + hours(6)
+        third = build(second, later, jma=result(record('jma', when=later - hours(1), name='ABLE', number='TC2650')),
+                      jtwc=result(record('jtwc', when=later - hours(1), name='ABLE', number='01W', season=2027)))
+        self.assertEqual((len(third['storms']), third['storms'][0]['match']['jtwc']), (1, 'id'))
+
+    def test_differently_named_neighbour_does_not_block(self):
+        # X unnamed at 20N; the record ABLE 50 km north of X; a neighbour 250 km from the record (within 2D).
+        # BAKER cannot be ABLE: no ambiguity (11c #6). Unnamed: ambiguous, a new system.
+        # Same name: rule 2 takes it first.
+        for neighbour, expected in (('BAKER', '2026-jma-tc2638'), (None, '2026-jtwc-31w'), ('ABLE', '2026-jma-tc2639')):
+            with self.subTest(neighbour=neighbour):
+                index = build(None, jma=result(record('jma', when=RECENT, name=None, lat=20.0),
+                                               record('jma', when=RECENT, name=neighbour, lat=north(300), number='TC2639')),
+                              jtwc=result(record('jtwc', when=RECENT, name='ABLE', lat=north(50))))
+                holder = next(s['cyclone_id'] for s in index['storms'] if s['ids']['jtwc'] == '31W')
+                self.assertEqual(holder, expected)
+
+    def test_day_and_taiwan_midnight_boundaries(self):
+        for storm_time, record_time in ((datetime(2026, 11, 11, 23, tzinfo=UTC), datetime(2026, 11, 12, 1, tzinfo=UTC)),
+                                        (datetime(2026, 11, 11, 15, 50, tzinfo=UTC), datetime(2026, 11, 11, 16, 10, tzinfo=UTC)),
+                                        (datetime(2026, 11, 30, 21, tzinfo=UTC), datetime(2026, 12, 1, 3, tzinfo=UTC))):
+            with self.subTest(storm_time=storm_time):
+                now = record_time + hours(1)
+                index = build(None, now, jma=result(record('jma', when=storm_time, name=None, lat=20.0)),
+                              cwa=result(record('cwa', when=record_time, name=None, lat=north(150))))
+                self.assertEqual(ids_of(index), ['2026-jma-tc2638'])
+
+    def test_numbers_with_gaps_are_processed_in_numeric_order(self):
+        keys = [official._number_key(record('cwa', when=NOW, number=n)) for n in ('10', '9', '35')]
+        self.assertEqual(sorted(keys), [keys[1], keys[0], keys[2]])
+        # 31W and 33W (no 32W) both near one JMA system: neither joins; result does not depend on input order.
+        jma = result(record('jma', when=RECENT, name=None))
+        a = record('jtwc', when=RECENT, name=None, number='33W', lat=north(50, 29.0))
+        b = record('jtwc', when=RECENT, name=None, lat=north(-50, 29.0))
+        one = build(None, jma=jma, jtwc=result(a, b))
+        two = build(None, jma=result(record('jma', when=RECENT, name=None)), jtwc=result(deepcopy(b), deepcopy(a)))
+        self.assertEqual(one, two)
+        self.assertEqual(ids_of(one), ['2026-jma-tc2638', '2026-jtwc-31w', '2026-jtwc-33w'])
 
 
 class RetentionTests(unittest.TestCase):

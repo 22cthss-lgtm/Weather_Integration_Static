@@ -10,6 +10,7 @@ from uuid import uuid4
 from .http_client import http_scope
 from .publication import atomic_write_json
 from .snapshots import REQUIRED, read_resources, export_snapshot
+from .tropical_contract import OFFICIAL_INDEX_PATH, STORM_FILE, validate_official_index
 from .update_runner import FileLock
 
 
@@ -54,11 +55,43 @@ def _prune_past_history(candidate, today):
     return pruned
 
 
-def run_candidate(products, seed_data, store, update, *, allow_empty=False, history_today=None):
+def _prune_tropical(candidate):
+    """Remove official storm files whose system the valid official index no longer lists.
+
+    design.md 3.6: only exact ``tropical/official/storms/{id}/(analysis|forecast).json``
+    paths are touched; a missing or invalid index removes nothing. No network.
+    Models and ensemble prefixes join in S8/S9.
+    """
+    try:
+        index = validate_official_index(json.loads((candidate / OFFICIAL_INDEX_PATH).read_bytes()))
+    except Exception:  # noqa: BLE001 - unreadable or invalid: keep the whole prefix.
+        return []
+    listed = {storm['cyclone_id'] for storm in index['storms']}
+    folder = candidate / 'tropical' / 'official' / 'storms'
+    if not folder.is_dir() or folder.is_symlink():
+        return []
+    pruned = []
+    for path in sorted(folder.rglob('*')):
+        name = path.relative_to(candidate).as_posix()
+        match = STORM_FILE.fullmatch(name)
+        if match and path.is_file() and not path.is_symlink() and match[1] not in listed:
+            path.unlink()
+            pruned.append(name)
+    for name in pruned:
+        directory = (candidate / name).parent
+        if directory.parent == folder and directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()  # Only the now-empty storms/{id}/ itself.
+    return pruned
+
+
+def run_candidate(products, seed_data, store, update, *, allow_empty=False, history_today=None,
+                  prune_tropical=False):
     """Never edit the seed/public directory; all mutations happen in a temp tree.
 
     With ``history_today`` (an Asia/Taipei date), past-day history inventories are
     removed after all updates; see ``_prune_past_history``. Default keeps them.
+    With ``prune_tropical``, storm files of systems no longer in the official
+    index are removed after all updates; see ``_prune_tropical``. Default keeps them.
     """
     products = list(dict.fromkeys(products))
     if not products and not allow_empty:
@@ -106,8 +139,10 @@ def run_candidate(products, seed_data, store, update, *, allow_empty=False, hist
                         p.write_bytes(content)
                         invalid_outputs.add(name)
             pruned = _prune_past_history(candidate, history_today) if history_today is not None else []
+            # Separate from the history removals and their report field (design.md 3.6).
+            pruned_tropical = _prune_tropical(candidate) if prune_tropical else []
             after, _ = read_resources(candidate)
-            expected = set(REQUIRED) | (set(before) - set(pruned)) | set(after)
+            expected = set(REQUIRED) | (set(before) - set(pruned) - set(pruned_tropical)) | set(after)
             # Each current-image latest must have its corresponding day inventory.
             for kind in ('radar', 'satellite', 'rainfall'):
                 latest = after.get(f'images/{kind}/latest.json')
@@ -147,6 +182,7 @@ def run_candidate(products, seed_data, store, update, *, allow_empty=False, hist
             }
             # Only report removals that actually ship; an unpublished candidate is discarded.
             report['pruned_history'] = pruned if report['publishable'] else []
+            report['pruned_tropical'] = pruned_tropical if report['publishable'] else []
             if report['publishable']:
                 snapshot = store / 'snapshots' / run_id
                 manifest = export_snapshot(candidate, snapshot, snapshot_id=run_id)

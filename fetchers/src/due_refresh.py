@@ -191,8 +191,11 @@ def prepare_due(archive, sha256, work, *, mode, policy, task_config=None, state_
         # Refresh drops past-day history inventories (user-confirmed 2026-11-10); the
         # explicit publish path republishes the seed unchanged.
         prune = mode == 'refresh' and policy['history'].get('keep_past_dates', True) is False
+        # Storm files of systems no longer indexed go on every refresh, whatever
+        # the history policy; publish republishes the seed unchanged (design.md 3.6).
         report = run_candidate(chosen, seed, work / 'store', checked_update, allow_empty=True,
-                               history_today=now.astimezone(TAIPEI).date() if prune else None)
+                               history_today=now.astimezone(TAIPEI).date() if prune else None,
+                               prune_tropical=mode == 'refresh')
         snapshot = work / 'store/snapshots' / str(report['snapshot_id'])
         data_root = snapshot / 'data' if report['publishable'] else seed
         content = content_metadata(data_root, hashes if report['publishable'] else selected['content']['image_hashes'], now.isoformat())

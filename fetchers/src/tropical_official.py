@@ -27,6 +27,12 @@ STALE_AFTER = {'jtwc': timedelta(hours=15), 'jma': timedelta(hours=9), 'cwa': ti
 FAILED_SOURCE_CARRY_LIMIT = timedelta(hours=72)
 ENDED_RETENTION = timedelta(hours=48)
 NAME_MATCH_MAX_KM = 1500.0
+# Rule 3 (design.md 2.3, 11b #5, 11c), all [初值]: D = base + speed x time gap.
+POSITION_BASE_KM = 150.0
+POSITION_SPEED_KMH = 60.0
+POSITION_MAX_GAP = timedelta(hours=6)
+# Rules 1 and 2 accept one season boundary (design.md 11c #1, #7).
+BOUND_SEASON_GAP = 1
 FUTURE_ANALYSIS_TOLERANCE = timedelta(hours=1)
 MINT_ORDER = ('jma', 'jtwc', 'cwa')
 EARTH_RADIUS_KM = 6371.0
@@ -58,8 +64,8 @@ def _minute(now):
 
 
 def _bound(storm, record):
-    """Rule 1: the agency identifier is already bound to this storm in the same season."""
-    if storm['season'] != record['season']:
+    """Rule 1: the agency identifier is already bound to this storm, same or adjacent season (11c #1)."""
+    if abs(storm['season'] - record['season']) > BOUND_SEASON_GAP:
         return False
     ids = storm['ids']
     if record['agency'] == 'jma':
@@ -74,6 +80,81 @@ def _latest_position(storm):
     known = [value for value in storm['summary'].values() if value is not None]
     newest = max(known, key=lambda value: value['analysis_time'])
     return newest['lat'], newest['lon']
+
+
+def _known_positions(storm, files, applied):
+    """Every known (time, lat, lon) of a system: its summaries, the saved fixes and
+    past tracks (only systems the previous valid index lists), and this run's records."""
+    identity = storm['cyclone_id']
+    points = []
+    for agency in AGENCIES:
+        summary = storm['summary'][agency]
+        if summary is not None:
+            points.append((parse_stamp(summary['analysis_time']), summary['lat'], summary['lon']))
+        block = _saved_block(files, identity, 'analysis', agency)
+        if block is not None:
+            for point in block['past_track'] + [block['fix']]:
+                points.append((parse_stamp(point['analysis_time']), point['lat'], point['lon']))
+        record = applied.get((identity, agency))
+        if record is not None:
+            points.append((record['analysis_time'], record['lat'], record['lon']))
+            for point in (record.get('extra_points') or []) + (record.get('source_track') or []):
+                points.append((parse_stamp(point['analysis_time']), point['lat'], point['lon']))
+    return points
+
+
+def position_gap(points, record):
+    """``(distance_km, D)`` against the known point nearest in time to the record,
+    or None when no point lies within POSITION_MAX_GAP. Equal gaps take the nearer point."""
+    best = None
+    for moment, lat, lon in points:
+        gap = abs(moment - record['analysis_time'])
+        if gap > POSITION_MAX_GAP:
+            continue
+        candidate = (gap, distance_km(record['lat'], record['lon'], lat, lon))
+        if best is None or candidate < best:
+            best = candidate
+    if best is None:
+        return None
+    gap, distance = best
+    return distance, POSITION_BASE_KM + POSITION_SPEED_KMH * gap.total_seconds() / 3600
+
+
+def _measure(storms, record, files, applied):
+    """identity -> (distance, D) for every system with a known point within the time limit."""
+    measured = {}
+    for identity, storm in sorted(storms.items()):
+        value = position_gap(_known_positions(storm, files, applied), record)
+        if value is not None:
+            measured[identity] = value
+    return measured
+
+
+def _position_target(storms, record, touched, files, applied):
+    """Rule 3: exactly one eligible system within its own D, and no other system
+    within its own 2D (design.md 2.3, 11b #5, 11c #2-#4). Otherwise None."""
+    agency = record['agency']
+    within, blocked = [], False
+    for identity, (distance, allowed) in _measure(storms, record, files, applied).items():
+        storm = storms[identity]
+        eligible = (storm['summary'][agency] is None and identity not in touched[agency]
+                    and (record['name'] is None or storm['name'] is None))
+        named_otherwise = (record['name'] is not None and storm['name'] is not None
+                           and name_key(record['name']) != name_key(storm['name']))
+        if eligible and distance <= allowed:
+            within.append(identity)
+        elif distance <= 2 * allowed and not named_otherwise:
+            # Any other system nearby makes it ambiguous, including one that
+            # already holds this agency's data (11c #3); one with a different
+            # name cannot be this record's system and does not (11c #6).
+            blocked = True
+    return within[0] if len(within) == 1 and not blocked else None
+
+
+def _number_key(record):
+    """Order within one agency: season, then the number (numerically)."""
+    key = record['key'] if isinstance(record['key'], tuple) else (record['key'],)
+    return (record['season'],) + tuple((int(part), '') if part.isdigit() else (-1, part) for part in key)
 
 
 def _mint_id(record):
@@ -133,13 +214,15 @@ def _still_listed(storm, agency, listed):
                and (storm['season'], kind, storm['ids']['cwa_' + kind]) in listed for kind in ('td', 'ty'))
 
 
-def build_index(previous, results, now, applied=None):
+def build_index(previous, results, now, applied=None, files=None):
     """Pure decision: previous index (validated dict or None) + source results -> new index.
 
     ``applied`` (optional dict) receives ``(cyclone_id, agency) -> record`` for
-    every summary replaced in this run.
+    every summary replaced in this run. ``files`` are the saved storm files
+    (``read_previous_files``); rule 3 uses them only as known positions.
     """
     now = now.astimezone(timezone.utc)
+    applied = {} if applied is None else applied
     for agency in AGENCIES:
         # An analysis from the future is a broken source value: it would stay "active" indefinitely.
         sane = [record for record in results[agency].records
@@ -154,44 +237,60 @@ def build_index(previous, results, now, applied=None):
     previous_ok = {agency: ((previous or {}).get('sources', {}).get(agency) or {}).get('last_ok_at')
                    for agency in AGENCIES}
     touched = {agency: set() for agency in AGENCIES}
-    pending = []
+    pending = {agency: [] for agency in AGENCIES}
     # Rule 1 first for every agency: an existing binding is never overturned.
     for agency in MINT_ORDER:
         for record in results[agency].records:
             target = next((identity for identity, storm in sorted(storms.items())
                            if identity not in touched[agency] and _bound(storm, record)), None)
             if target is None:
-                pending.append(record)
+                pending[agency].append(record)
                 continue
             _apply(storms[target], record, 'id', now, applied)
             touched[agency].add(target)
-    # Rule 2 (name), then rule 4 (mint). Rule 3 (position) belongs to S6b (design.md 11b).
-    for record in pending:
-        agency = record['agency']
-        if not record['in_scope']:
-            continue  # Outside the basin and not already tracked.
-        target = None
-        if record['name'] is not None:
-            for identity, storm in sorted(storms.items()):
-                if (storm['summary'][agency] is None and identity not in touched[agency]
-                        and storm['season'] == record['season'] and storm['name'] is not None
-                        and name_key(storm['name']) == name_key(record['name'])
-                        and distance_km(record['lat'], record['lon'], *_latest_position(storm)) <= NAME_MATCH_MAX_KM):
-                    target = identity
-                    break
-        if target is not None:
+    # Then agency by agency (JMA, JTWC, CWA; by number within one agency):
+    # rule 2 (name), rule 3 (position), rule 4 (mint). Candidates include the
+    # systems minted earlier in this run (11b #5 ③). A system an agency mints
+    # holds that agency's data, so no other record of that agency can join it:
+    # running rule 2 for the whole agency first changes no outcome.
+    for agency in MINT_ORDER:
+        rest = []
+        # Outside the basin and not already tracked: ignored.
+        for record in sorted((r for r in pending[agency] if r['in_scope']), key=_number_key):
+            target = None
+            if record['name'] is not None:
+                for identity, storm in sorted(storms.items()):
+                    if (storm['summary'][agency] is None and identity not in touched[agency]
+                            and abs(storm['season'] - record['season']) <= BOUND_SEASON_GAP
+                            and storm['name'] is not None
+                            and name_key(storm['name']) == name_key(record['name'])
+                            and distance_km(record['lat'], record['lon'], *_latest_position(storm)) <= NAME_MATCH_MAX_KM):
+                        target = identity
+                        break
+            if target is None:
+                rest.append(record)
+                continue
             _apply(storms[target], record, 'name', now, applied)
-        elif is_active(agency, record['analysis_time'], record['ended'], now):
-            storm = _new_storm(record)
-            target = storm['cyclone_id']
-            if target in storms:
-                continue  # Never overwrite an existing system.
-            storms[target] = storm
-            _apply(storm, record, 'origin', now, applied)
-            storm['match'][agency] = 'origin'
-        else:
-            continue  # Inactive leftovers never mint a system (design.md 2.2).
-        touched[agency].add(target)
+            touched[agency].add(target)
+        # Two records of one agency within D of the same system: neither joins by position (11b #5 ②).
+        near = [{identity for identity, (distance, allowed) in _measure(storms, record, files, applied).items()
+                 if distance <= allowed} for record in rest]
+        shared = {i for i in range(len(rest)) for j in range(len(rest)) if i != j and near[i] & near[j]}
+        for number, record in enumerate(rest):
+            target = None if number in shared else _position_target(storms, record, touched, files, applied)
+            if target is not None:
+                _apply(storms[target], record, 'position', now, applied)
+            elif is_active(agency, record['analysis_time'], record['ended'], now):
+                storm = _new_storm(record)
+                target = storm['cyclone_id']
+                if target in storms:
+                    continue  # Never overwrite an existing system.
+                storms[target] = storm
+                _apply(storm, record, 'origin', now, applied)
+                storm['match'][agency] = 'origin'
+            else:
+                continue  # Inactive leftovers never mint a system (design.md 2.2).
+            touched[agency].add(target)
     # Systems this run brought no data for.
     for identity, storm in storms.items():
         for agency in AGENCIES:
@@ -423,7 +522,7 @@ def update_tropical_official(data_root, *, now=None, transport=None, wait=time.s
     results = collect(previous, now, transport=transport, wait=wait, clock=clock,
                       api_key=api_key, policy=policy, files=files)
     applied = {}
-    index = build_index(previous, results, now, applied)
+    index = build_index(previous, results, now, applied, files)
     outputs = build_storm_files(index, applied, files, now)
     index, outputs = limit_sizes(index, outputs)
     index = validate_official_index(index)
