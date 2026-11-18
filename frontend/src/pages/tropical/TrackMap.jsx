@@ -1,4 +1,4 @@
-// Leaflet map for official tracks (design.md 7.2, 7.3). Loaded lazily with the Forecast tab only.
+// Leaflet map for official tracks and switched-on model tracks (design.md 7.2, 7.3, 11f). Loaded lazily with the Forecast tab only.
 // No tile layer and no external request: the land is a bundled Natural Earth GeoJSON, already in
 // 0-360 longitudes. It draws only what tracks.js drawables() returns.
 import { useEffect, useRef } from "react";
@@ -139,12 +139,25 @@ export default function TrackMap({ items, colors, onSelectNode, ready = true }) 
     if (!map || !layer) return;
     layer.clearLayers();
     const bounds = [];
-    // Areas first, then lines, then nodes, so nothing covers a clickable node.
-    const order = { radii: 0, circle: 1, line: 2, node: 3 };
+    // Areas first, then lines, then nodes, so nothing covers a clickable node. Model nodes sit
+    // under the official ones. Model items are never added to the fit bounds (design.md 11f F6).
+    const order = { radii: 0, circle: 1, line: 2, modelLine: 2, modelNode: 3, node: 4 };
     const sorted = [...items].sort((left, right) => order[left.type] - order[right.type]);
     for (const item of sorted) {
-      const color = colors[item.agency];
-      if (item.type === "line") {
+      const color = colors[item.model ?? item.agency];
+      if (item.type === "modelLine") {
+        L.polyline(item.latlngs, { color, weight: 1.5, opacity: 0.9, dashArray: "1 5", lineCap: "round", interactive: false })
+          .addTo(layer);
+      } else if (item.type === "modelNode") {
+        const emphasis = item.selected || item.highlighted;
+        L.circleMarker(item.latlng, {
+          radius: emphasis ? 6 : 3.5,
+          color: emphasis ? "#111" : color,
+          weight: emphasis ? 3 : 1.5,
+          fillColor: "#fff",
+          fillOpacity: 1,
+        }).on("click", () => selectRef.current(item.nodeId)).addTo(layer);
+      } else if (item.type === "line") {
         L.polyline(item.latlngs, {
           color, weight: item.layer === "past" ? 2 : 2.5, dashArray: item.layer === "forecast" ? "6 6" : null,
           interactive: false,
@@ -179,5 +192,5 @@ export default function TrackMap({ items, colors, onSelectNode, ready = true }) 
     }
   }, [items, colors, ready]);
 
-  return <div ref={container} className="tc-map" role="region" aria-label="官方路徑地圖（可拖曳與縮放）" />;
+  return <div ref={container} className="tc-map" role="region" aria-label="路徑地圖：官方路徑與已開啟的數值模式路徑（可拖曳與縮放）" />;
 }

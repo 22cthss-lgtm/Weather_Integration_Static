@@ -228,7 +228,8 @@ test("attribution names CWA, JMA and JTWC and is marked provisional", async () =
   await renderPage();
   const footer = screen.getByRole("contentinfo");
   expect(within(footer).getByText(/暫定文字/)).toBeTruthy();
-  expect(within(footer).getByText(/17 U\.S\.C\. §403/)).toBeTruthy();
+  // JTWC, and NOAA/NWS when the model layers are built in (design.md 11f F9).
+  expect(within(footer).getByText(/JTWC）資料，該資料不受著作權保護（17 U\.S\.C\. §403）/)).toBeTruthy();
   expect(within(footer).getByText(/出典：気象庁ホームページ/)).toBeTruthy();
   expect(within(footer).getByText(/交通部中央氣象署/)).toBeTruthy();
 });

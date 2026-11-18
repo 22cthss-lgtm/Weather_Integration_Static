@@ -99,9 +99,10 @@ export const ANALYSIS_KEY = "analysis";
 /**
  * Timeline (design.md 7.5, 9.4 S7): one tick per distinct valid_time that some agency really
  * forecast, plus a first "latest analysis" step whose entries keep each agency's own fix time.
+ * `modelTracks` are the model tracks switched on (models.js enabledModelTracks).
  * No tick is interpolated and no node is moved to a tick it does not have.
  */
-export function buildTimeline(tracks) {
+export function buildTimeline(tracks, modelTracks = []) {
   const analysis = tracks.filter(track => track.fix).map(track => ({
     agency: track.agency, nodeId: track.fix.id, time: track.fix.time, tauH: null, initTime: null,
   }));
@@ -111,6 +112,16 @@ export function buildTimeline(tracks) {
       if (!byTime.has(point.time)) byTime.set(point.time, []);
       byTime.get(point.time).push({
         agency: track.agency, nodeId: point.id, time: point.time, tauH: point.tauH, initTime: track.initTime,
+      });
+    }
+  }
+  // Only model layers that are switched on add ticks (design.md 11e E3); the "latest analysis"
+  // step stays official-only (11f F5).
+  for (const track of modelTracks) {
+    for (const point of track.points) {
+      if (!byTime.has(point.time)) byTime.set(point.time, []);
+      byTime.get(point.time).push({
+        agency: null, model: track.model, nodeId: point.id, time: point.time, tauH: point.tauH, initTime: track.initTime,
       });
     }
   }
@@ -187,8 +198,8 @@ export function radiiShapes(center, radii) {
  * What the map draws for the current toggles and timeline selection.
  * Each item carries plotted [lat, lon] pairs (lon already unwrapped).
  */
-export function drawables(tracks, toggles, selectedKey = null, selectedNodeId = null) {
-  const timeline = buildTimeline(tracks);
+export function drawables(tracks, toggles, selectedKey = null, selectedNodeId = null, modelTracks = []) {
+  const timeline = buildTimeline(tracks, modelTracks);
   const highlighted = new Set(selectedKey === null ? [] : entriesAt(timeline, selectedKey).map(entry => entry.nodeId));
   const items = [];
   const at = item => [item.lat, item.plotLon];
@@ -228,6 +239,17 @@ export function drawables(tracks, toggles, selectedKey = null, selectedNodeId = 
           items.push({ type: "radii", layer: "radii", agency: track.agency, threshold: radii.threshold, latlngs: shape });
         }
       }
+    }
+  }
+  // Model tracks (switched on only): their own dotted line and hollow nodes, never joined to an
+  // official fix (design.md 7.7, 11f F4). The map leaves them out of the first fit (11f F6).
+  for (const track of modelTracks) {
+    if (track.points.length > 1) {
+      items.push({ type: "modelLine", layer: "model", model: track.model, latlngs: track.points.map(at) });
+    }
+    for (const point of track.points) {
+      items.push({ type: "modelNode", layer: "model", model: track.model, nodeId: point.id, nodeKind: "model",
+        latlng: at(point), highlighted: highlighted.has(point.id), selected: point.id === selectedNodeId });
     }
   }
   return items;

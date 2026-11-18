@@ -96,7 +96,7 @@ export default function TropicalPage({ getNow = () => Date.now() }) {
   const query = parseTropicalQuery(searchParams);
   const [result, setResult] = useState({ loading: true, index: null });
   const [now, setNow] = useState(() => getNow());
-  // analysis.json / forecast.json already read in this page lifetime (design.md 7.4).
+  // analysis.json / forecast.json and model files already read in this page lifetime (design.md 7.4).
   const stormFiles = useRef(new Map());
 
   useEffect(() => {
@@ -149,7 +149,7 @@ export default function TropicalPage({ getNow = () => Date.now() }) {
         <h2>熱帶系統專區｜西北太平洋</h2>
         <Banner display={display} index={index} />
         <StormDetail key={storm.cyclone_id} storm={storm} tab={query.tab} sameName={sameName.has(storm.cyclone_id)}
-          cache={stormFiles.current} />
+          cache={stormFiles.current} now={now} />
         <Attribution />
       </section>
     );

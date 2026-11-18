@@ -1,9 +1,14 @@
 // One storm: /tropical?storm={cyclone_id}&tab=overview|forecast|analysis|imagery (design.md 7.1, 7.4).
-import { Component, useEffect, useState } from "react";
+import { Component, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchTropicalStormFile } from "../../api";
 import { AGENCIES } from "../../tropical/status";
 import { checkStormFile } from "../../tropical/storm-files";
+import { MODEL_LAYERS_ENABLED } from "../../tropical/features";
+import {
+  MODELS_INDEX_KEY, checkModelFile, checkModelsIndex, fetchTropicalModelsFile, fetchTropicalModelsIndex,
+  modelEntry, modelFileKey,
+} from "../../tropical/models";
 import {
   AGENCY_LABELS, AGENCY_SHORT, formatGust, formatIds, formatMovement, formatPosition, formatPressure,
   formatRadii, formatWind, textOrNull,
@@ -54,6 +59,72 @@ function useStormFiles(cycloneId, cache) {
     };
   }, [cycloneId, cache]);
   return files;
+}
+
+/**
+ * Model data for the Forecast tab (design.md 7.4, 11e E4, 11f F2): the models index, then the
+ * newest cycle file of this storm. Requests start only while `active` (Forecast tab open and the
+ * build switch on). Results, failures included, stay in the page-lifetime cache, so each file is
+ * read at most once. A request cut off by leaving the tab is not cached and is made again later.
+ * @returns {status: "loading" | "unavailable" | "none"} or {status: "ok", cycle, file}
+ */
+function useModelFiles(cycloneId, cache, active) {
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    if (!active) return undefined;
+    let alive = true;
+    const pending = [];
+    const load = (key, request, check) => {
+      if (cache.has(key)) return;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      pending.push({ controller, timer });
+      request({ signal: controller.signal })
+        .then(check)
+        .catch(() => null)
+        .then(result => {
+          if (!alive) return;
+          cache.set(key, result);
+          setVersion(current => current + 1);
+        })
+        .finally(() => clearTimeout(timer));
+    };
+    load(MODELS_INDEX_KEY, fetchTropicalModelsIndex, checkModelsIndex);
+    const index = cache.get(MODELS_INDEX_KEY);
+    if (index) {
+      const entry = modelEntry(index, cycloneId);
+      if (entry.status === "ok") {
+        load(modelFileKey(cycloneId, entry.cycle),
+          options => fetchTropicalModelsFile(cycloneId, entry.cycle, options),
+          data => checkModelFile(data, cycloneId, entry.cycle));
+      }
+    }
+    return () => {
+      alive = false;
+      for (const { controller, timer } of pending) {
+        clearTimeout(timer);
+        controller.abort();
+      }
+    };
+  }, [active, cycloneId, cache, version]);
+
+  let status = "loading";
+  let cycle = null;
+  let file = null;
+  if (cache.has(MODELS_INDEX_KEY)) {
+    const index = cache.get(MODELS_INDEX_KEY);
+    const entry = index === null ? { status: "unavailable" } : modelEntry(index, cycloneId);
+    status = entry.status;
+    if (entry.status === "ok") {
+      const key = modelFileKey(cycloneId, entry.cycle);
+      cycle = entry.cycle;
+      file = cache.get(key) ?? null;
+      status = !cache.has(key) ? "loading" : file === null ? "unavailable" : "ok";
+    }
+  }
+  // A stable object while nothing changed, so the panel does not rebuild tracks and redraw the
+  // map on every clock tick (review suggestion 3).
+  return useMemo(() => (status === "ok" ? { status, cycle, file } : { status }), [status, cycle, file]);
 }
 
 // Last line of defence: an unexpected value inside one tab must not blank the whole page.
@@ -209,8 +280,9 @@ function AnalysisTab({ storm, analysis }) {
   );
 }
 
-export default function StormDetail({ storm, tab, sameName, cache }) {
+export default function StormDetail({ storm, tab, sameName, cache, now = null, modelsEnabled = MODEL_LAYERS_ENABLED }) {
   const files = useStormFiles(storm.cyclone_id, cache);
+  const models = useModelFiles(storm.cyclone_id, cache, modelsEnabled && tab === "forecast");
   const name = textOrNull(storm.name);
   const nameZh = textOrNull(storm.name_zh);
   const ids = formatIds(storm.ids);
@@ -246,7 +318,10 @@ export default function StormDetail({ storm, tab, sameName, cache }) {
       <TabBoundary key={tab}>
         {tab === "overview" ? <OverviewTab storm={storm} analysis={files.analysis} /> : null}
         {tab === "analysis" ? <AnalysisTab storm={storm} analysis={files.analysis} /> : null}
-        {tab === "forecast" ? <ForecastPanel analysis={files.analysis} forecast={files.forecast} /> : null}
+        {tab === "forecast" ? (
+          <ForecastPanel analysis={files.analysis} forecast={files.forecast} storm={storm} now={now}
+            models={modelsEnabled ? models : null} />
+        ) : null}
         {tab === "imagery" ? <p className="status-message">圖像分頁尚未開放。</p> : null}
       </TabBoundary>
     </article>

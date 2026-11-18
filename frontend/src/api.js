@@ -4,7 +4,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5174
 const STATIC_IMAGE_TYPES = new Set(imageTypes);
 const CURRENT_IMAGE_TYPES = new Set(["radar", "satellite", "rainfall"]);
 
-async function readStatic(path, { signal } = {}) {
+export async function readStatic(path, { signal } = {}) {
   const response = await fetch(`${import.meta.env.BASE_URL}${path}`, {
     cache: "no-cache",
     ...(signal ? { signal } : {}),

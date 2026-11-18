@@ -34,3 +34,40 @@ test("mount, update, unmount without stray redraw errors", async () => {
   expect(errors).toEqual([]);
   expect(document.querySelectorAll(".leaflet-container")).toHaveLength(0);
 });
+
+test("model layers draw on the real map without errors and stay out of the first fit (11f F6)", async () => {
+  const { default: L } = await import("leaflet");
+  const { buildModelTracks, checkModelFile, enabledModelTracks } = await import("./tropical/models");
+  const { penaModels06 } = await import("./tropical/model-test-fixtures");
+  const errors = [];
+  const onError = event => { errors.push(String(event.error || event.message)); event.preventDefault(); };
+  window.addEventListener("error", onError);
+  const spy = vi.spyOn(console, "error").mockImplementation(message => errors.push(String(message)));
+  const fit = vi.spyOn(L.Map.prototype, "fitBounds");
+  const tracks = buildTracks(checkStormFile(cempakaAnalysis(), "analysis", "2026-jma-tc2638"),
+    checkStormFile(cempakaForecast(), "forecast", "2026-jma-tc2638"));
+  const file = penaModels06();
+  const models = buildModelTracks({ status: "ok", file: checkModelFile(file, "2026-jtwc-04c", file.cycle) });
+  const shown = enabledModelTracks(models, { gfs: true, aigfs: true, ifs: false, aifs: false });
+  const colors = { cwa: "#0f0", jma: "#00f", jtwc: "#f00", gfs: "#60f", aigfs: "#c06" };
+  const officialItems = drawables(tracks, defaultToggles());
+  const withModels = drawables(tracks, defaultToggles(), null, null, shown);
+  const view = render(<TrackMap items={withModels} colors={colors} onSelectNode={() => {}} ready />);
+  await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+  expect(fit).toHaveBeenCalledTimes(1);
+  const fitted = fit.mock.calls[0][0];
+  const officialPoints = officialItems.flatMap(item => (item.type === "line" ? item.latlngs : item.type === "node" ? [item.latlng] : []));
+  const key = points => points.map(point => point.join(",")).sort();
+  expect(key(fitted)).toEqual(key(officialPoints)); // the map orders items by type before drawing
+  // PENA's model tracks cross 180: plotted longitudes run past 180 instead of wrapping.
+  expect(withModels.some(item => item.type === "modelLine" && item.latlngs.some(([, lon]) => lon > 180))).toBe(true);
+  view.rerender(<TrackMap items={officialItems} colors={colors} onSelectNode={() => {}} ready />);
+  view.rerender(<TrackMap items={withModels} colors={colors} onSelectNode={() => {}} ready />);
+  expect(fit).toHaveBeenCalledTimes(1);
+  view.unmount();
+  await act(async () => { await new Promise(r => setTimeout(r, 100)); });
+  fit.mockRestore();
+  window.removeEventListener("error", onError);
+  spy.mockRestore();
+  expect(errors).toEqual([]);
+});
