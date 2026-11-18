@@ -1,0 +1,4 @@
+-r requirements-dev.txt
+# Lint and audit tools used only by .github/workflows/ci.yml (not the Pages publish chain).
+ruff==0.17.5
+pip-audit==2.10.1

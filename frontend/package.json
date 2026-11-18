@@ -8,7 +8,8 @@
     "build": "vite build",
     "build:pages": "node scripts/pages-build.mjs",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "lint": "eslint . --max-warnings 0"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -16,10 +17,14 @@
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
     "jsdom": "^29.1.1",
     "vite": "^5.4.10",
     "vitest": "^3.2.4"
