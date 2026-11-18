@@ -113,3 +113,64 @@ export function formatIds(ids) {
   if (value("cwa_td")) parts.push(`CWA 熱帶性低氣壓 TD ${value("cwa_td")}`);
   return parts;
 }
+
+const DIRECTION_WORDS = { STNR: "幾乎停滯", VAR: "方向不定" };
+
+/** Movement in the forms the agency gave (design.md 1.4); nothing is converted. */
+export function formatMovement(movement) {
+  if (!movement || typeof movement !== "object") return null;
+  const parts = [];
+  if (Number.isInteger(movement.direction_deg)) parts.push(`${movement.direction_deg}°`);
+  const text = textOrNull(movement.direction_text);
+  if (text) parts.push(DIRECTION_WORDS[text] || text);
+  const speeds = [];
+  if (finite(movement.speed_kt)) speeds.push(`${movement.speed_kt} kt`);
+  if (finite(movement.speed_kmh)) speeds.push(`${movement.speed_kmh} km/h`);
+  if (speeds.length) parts.push(speeds.join("／"));
+  return parts.length ? parts.join("，") : null;
+}
+
+/** Gust in the units the agency gave; no averaging period is attached because none is given. */
+export function formatGust(gust) {
+  if (!gust || typeof gust !== "object") return null;
+  const values = [];
+  if (finite(gust.kt)) values.push(`${gust.kt} kt`);
+  if (finite(gust.ms)) values.push(`${gust.ms} m/s`);
+  return values.length ? values.join("／") : null;
+}
+
+const SECTOR_LABELS = { NE: "東北", SE: "東南", SW: "西南", NW: "西北", N: "北", E: "東", S: "南", W: "西", ALL: "全域" };
+
+/** "34 kt 風圈（半徑 nm）：東北 130、東南 95…"; a null radius is shown as "未提供". */
+export function formatRadii(radii) {
+  if (!radii || !radii.threshold || !Array.isArray(radii.sectors)) return null;
+  const threshold = `${radii.threshold.value} ${radii.threshold.unit}`;
+  const sectors = radii.sectors.map(sector => {
+    const label = SECTOR_LABELS[sector.dir] || sector.dir;
+    return `${label} ${finite(sector.radius) ? sector.radius : "未提供"}`;
+  });
+  return `${threshold} 風圈（半徑 ${radii.unit}）：${sectors.join("、")}`;
+}
+
+/** JMA forecast circle / CWA 70% radius: an agency probability circle, not a wind area. */
+export function formatProbabilityCircle(agency, circle) {
+  if (!circle || !finite(circle.radius) || typeof circle.unit !== "string") return null;
+  const pct = Number.isInteger(circle.probability_pct) ? `${circle.probability_pct}%` : "";
+  const name = agency === "jma" ? `預報圓（中心進入機率 ${pct}）` : `${pct} 機率半徑`;
+  return `${name}：${circle.radius} ${circle.unit}`;
+}
+
+const NOTE_LABELS = {
+  DISSIPATING: "減弱消散中",
+  DISSIPATED: "已消散",
+  EXTRATROPICAL: "變性為溫帶氣旋",
+  POST_TROPICAL: "轉為後熱帶系統",
+};
+
+export function formatNote(note) {
+  return NOTE_LABELS[note] ? `${NOTE_LABELS[note]}（${note}）` : null;
+}
+
+export function formatTau(tauH) {
+  return Number.isInteger(tauH) ? `+${tauH} 小時` : null;
+}

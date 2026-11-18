@@ -198,13 +198,12 @@ test("same-name storms listed side by side show the possible-duplicate hint", as
   expect(within(screen.getByRole("article", { name: "DIFFERENT" })).queryByText(/可能為同一系統/)).toBeNull();
 });
 
-test("a valid storm parameter in the index highlights that system", async () => {
+test("a valid storm parameter in the index opens that system's page", async () => {
   serve(makeIndex({ storms: [cempaka(), endedStorm()] }));
   await renderPage({ url: "/tropical?storm=2026-jma-tc2637&tab=forecast" });
-  const card = screen.getByRole("article", { name: "PENA" });
-  expect(card.getAttribute("aria-current")).toBe("true");
-  expect(within(card).getByText(/個別系統頁尚未開放/)).toBeTruthy();
-  expect(screen.getByRole("article", { name: "CEMPAKA" }).getAttribute("aria-current")).toBeNull();
+  const page = screen.getByRole("article", { name: "PENA" });
+  expect(within(page).getByRole("link", { name: "預報路徑" }).getAttribute("aria-current")).toBe("page");
+  expect(screen.queryByRole("article", { name: "CEMPAKA" })).toBeNull();
   expect(pageText()).not.toContain("找不到這個系統");
 });
 
@@ -220,7 +219,8 @@ test.each(["2026-JMA-TC2638", "x", "2026-jma-tc2638/../a", "%3Cscript%3E"])(
     serve(makeIndex());
     await renderPage({ url: `/tropical?storm=${storm}&tab=evil` });
     expect(pageText()).not.toContain("找不到這個系統");
-    expect(screen.getByRole("article", { name: "CEMPAKA" }).getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("article", { name: "CEMPAKA" })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "系統資料分頁" })).toBeNull();
   });
 
 test("attribution names CWA, JMA and JTWC and is marked provisional", async () => {

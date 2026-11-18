@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, test, vi } from "vitest";
 import {
-  fetchDailyImages, fetchImageHistory, fetchLatestImage, fetchRainfallTop, fetchTropicalOfficialIndex,
+  fetchDailyImages, fetchImageHistory, fetchLatestImage, fetchRainfallTop, fetchTropicalOfficialIndex, fetchTropicalStormFile,
 } from "./api";
 
 afterEach(() => {
@@ -76,4 +76,16 @@ test.each([
   vi.stubGlobal("fetch", request);
   await expect(fetchTropicalOfficialIndex()).rejects.toThrow();
   expect(request).toHaveBeenCalledExactlyOnceWith("/data/tropical/official/index.json", { cache: "no-cache" });
+});
+
+test("tropical storm files are read only for checked ids and kinds", async () => {
+  const request = vi.fn(async () => ({ ok: true, json: async () => ({ ok: 1 }) }));
+  vi.stubGlobal("fetch", request);
+  expect(await fetchTropicalStormFile("2026-jma-tc2638", "forecast")).toEqual({ ok: 1 });
+  expect(request.mock.calls[0][0]).toMatch(/data\/tropical\/official\/storms\/2026-jma-tc2638\/forecast\.json$/);
+  expect(request.mock.calls[0][1].cache).toBe("no-cache");
+  for (const [id, kind] of [["../x", "analysis"], ["2026-jma-tc2638", "index"], ["2026-JMA-TC2638", "analysis"], [null, "analysis"]]) {
+    await expect(fetchTropicalStormFile(id, kind)).rejects.toThrow();
+  }
+  expect(request).toHaveBeenCalledTimes(1);
 });

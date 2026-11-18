@@ -21,6 +21,18 @@ export function fetchTropicalOfficialIndex({ signal } = {}) {
   return readStatic(TROPICAL_OFFICIAL_INDEX_PATH, { signal });
 }
 
+// Per-storm official files (design.md 1.4, 1.5, 7.4), read only after a storm is selected.
+// The id is checked again here so a path can never be built from an unchecked value.
+const STORM_FILE_ID = /^[0-9]{4}-(?:jma|jtwc|cwa)-[a-z0-9]{1,8}$/;
+const STORM_FILE_KINDS = new Set(["analysis", "forecast"]);
+
+export function fetchTropicalStormFile(cycloneId, kind, { signal } = {}) {
+  if (typeof cycloneId !== "string" || !STORM_FILE_ID.test(cycloneId) || !STORM_FILE_KINDS.has(kind)) {
+    return Promise.reject(new Error("Invalid tropical storm file request"));
+  }
+  return readStatic(`data/tropical/official/storms/${cycloneId}/${kind}.json`, { signal });
+}
+
 export async function fetchCurrentImageHistory(type, date) {
   if (!CURRENT_IMAGE_TYPES.has(type) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error("Invalid current-day image request");
