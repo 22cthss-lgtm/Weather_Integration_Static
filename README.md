@@ -31,7 +31,7 @@ Developed on the `feature/tropical-cyclone` branch and **not yet live**.
 - A page per storm with each agency's analysis side by side, an interactive map of the official past and forecast tracks (Leaflet with a bundled Natural Earth land outline, no external map tiles), and a timeline aligned to the agencies' real forecast valid times.
 - Display rules: intensities are shown only in the units and averaging periods each agency gives, never converted or compared across agencies. The timeline never interpolates, and forecasts from different initialisation times are labelled as such.
 
-Design notes and the stage-by-stage plan are in [`docs/tropical-cyclone/`](docs/tropical-cyclone/).
+Design notes and the stage-by-stage plan are in [`docs/tropical-cyclone/`](https://github.com/22cthss-lgtm/weather-observation-dashboard/tree/feature/tropical-cyclone/docs/tropical-cyclone) on the feature branch.
 
 ---
 
