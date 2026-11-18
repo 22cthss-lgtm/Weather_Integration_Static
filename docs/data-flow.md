@@ -323,7 +323,15 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 
 去重紀錄是 GitHub Actions 的 run metadata（`display_title`、ID、attempt、event、branch、workflow path、created_at），不是公開 JSON，也不是 7 天 scheduler-state artifact。其保留期限取決於 repository Actions 執行紀錄政策，不在本批改動。不得任意刪除仍用於接力查證的執行紀錄。
 
-每個邏輯派發最多一次 POST。派發前先找同識別碼；找到一份就沿用，找到多份則停止。HTTP 逾時、5xx、回應截斷或其他結果不明時，只做最多七輪完整查證（輪間 2／4／8／15／15／15 秒，約 59 秒），不重新 POST；每輪之間重讀控制器開關，停用即停止。2026-11-10 起由原三輪（約 6 秒）放寬：線上 Relay #27 在 POST 已建立發布 run 後，篩選列表約 6 秒內仍未顯示該 run 而安全停止，導致接力中斷約 3.4 小時。確認不到就報 `dispatch_unconfirmed_no_resend`，交由未來 cron 重新 seed，不能當作派發成功。即使 POST 回成功，也須查到匹配 run 才記錄成功派發。
+每個邏輯派發最多一次 POST。派發前先找同識別碼；找到一份就沿用，找到多份則停止。HTTP 逾時、5xx、回應截斷或其他結果不明時，只做最多七輪完整查證（輪間 2／4／8／15／15／15 秒，約 59 秒），不重新 POST；每輪之間重讀控制器開關，停用即停止。2026-11-10 起由原三輪（約 6 秒）放寬：線上 Relay #27 在 POST 已建立發布 run 後，篩選列表約 6 秒內仍未顯示該 run 而安全停止，導致接力中斷約 3.4 小時。確認不到就報 `dispatch_unconfirmed_no_resend`，不能當作派發成功。即使 POST 回成功，也須查到匹配 run 才記錄成功派發。
+
+2026-11-17 起（Relay 43835501368：POST 後 1 秒 Pages 43835544201 已建立，但約 59 秒內 `created>=` 列表都沒有列出，接力中斷約 6 小時 45 分鐘）：
+- POST 回應若帶 `workflow_run_id`，每輪先以 `GET /actions/runs/{id}` 直接查；ID、path、branch、event、created_at 任一不符即報 `untrusted_dispatch_response` 停止；標題尚未是預期 run-name 或該讀取 404／傳輸失敗時，改看列表。列表比對到的 ID 與回應 ID 不同時報 `ambiguous_dispatch_identity`。
+- POST 本身回傳明確的 HTTP 錯誤（429／5xx 以外，例如 422、404、403）代表未建立 run：不查證、不重送，報 `dispatch_rejected_<code>` 並以代碼 1 停止（例如 inputs 不相容時保持紅色）。逾時、5xx、429、回應截斷及其他非 HTTP 狀態的錯誤（例如壞 JSON、body 過大、redirect）都算結果不明而進入查證。
+- POST 之後的讀取若為 `api_transport_or_retry_exhausted`，或 total_count 與筆數暫時不一致的 `incomplete_run_query`，當作本輪未查到，不立即停止；超過 100 筆與其他錯誤照舊停止。查證開始 120 秒後不再開始新一輪；這不是硬上限，最後一輪仍可能用完各 GET 的重試（極端慢讀時多數分鐘）。
+- **發布**查證不到時不重送，回報 `update_unconfirmed`（註明 POST 已受理或結果不明），照常等到 600 秒並發出下一個 relay。若該發布 run 其實存在，下一輪會因 busy 或 600 秒 cadence 不追加；即使清單仍看不到而派出不同識別碼的發布，兩者也由 `pages-manual` 鎖先後執行，不會同時部署；同識別碼若出現兩份，admission 仍略過較晚者。
+- **下一 relay** 查證不到時同樣不重送，回報 `next_relay_unconfirmed` 與 `next_request` 後仍以代碼 1 結束（保留紅色提示）。POST 已受理時下一 relay 多半已排在 `weather-relay` 鎖後，接力會繼續；POST 結果不明且確實沒有建立時，才需等 cron 恢復。
+- 觀察發布子 run 結果的單次讀取若為上述暫時性錯誤，只記錄 not observed，不阻擋交棒；身分不符或其他錯誤仍停止。
 
 發布 admission 在原整批鎖內執行：核對 parent workflow／ID／attempt／branch、目前 run 是否出現在完整查詢，已有更早同識別碼 run 則略過 build。剛啟動的 run 可能暫時不在篩選列表中（線上 Pages chain #550 因此停止），2026-11-10 起最多再讀 4 次（間隔 2／4／8／15 秒，約 29 秒，每次間隔重讀開關），仍查不到才報 `current_run_not_in_complete_query`；遲到出現的較早同識別碼 run 仍判為重複而略過。自動請求不允許 rerun 重做抓取，需由新控制器產生新識別碼。普通手動輸入不需控制器或 token 即可通過 admission，原發布校驗照常執行。
 
@@ -335,7 +343,7 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 
 恢復時先確認舊控制器已結束（必要時在停用期間取消等待中的控制器），再 Enable workflow，等 cron 或明確手動 seed。快速關開若發生在兩次狀態讀取之間，舊 run 可能看不到中間的停用；本機測試不能替代此操作驗收。
 
-GET 最多三次、每次 timeout 10 秒、退避 1／3 秒；401／403／壞文件不重試。回應上限 2 MiB，拒絕 redirect，token 只送固定 api.github.com repository 路徑。POST 不重試；查證失敗不派發。等待以 monotonic clock 計算至控制器開始後 600 秒，最近自動派發不足 600 秒時先等待剩餘時間並重查 busy，不追趕漏掉的整排時次。整個 relay job 上限 18 分鐘，admission job 上限 3 分鐘。
+GET 最多三次、每次 timeout 10 秒、退避 1／3 秒；401／403／壞文件不重試。回應上限 2 MiB，拒絕 redirect，token 只送固定 api.github.com repository 路徑。POST 不重試；POST 前的查證失敗不派發。等待以 monotonic clock 計算至控制器開始後 600 秒，最近自動派發不足 600 秒時先等待剩餘時間並重查 busy，不追趕漏掉的整排時次。整個 relay job 上限 18 分鐘，admission job 上限 3 分鐘。
 
 更新／測試／部署失敗不使控制器立即重抓；控制器正常到下一時段再判斷。取消控制器不在 finally 續接，cron 或已存在 seed 仍可能恢復接力；需要持續停止時應停用 workflow。控制 API／完整性錯誤則安全停止接力，保留既有線上版本與有效 artifact，由 cron 備援接回。
 

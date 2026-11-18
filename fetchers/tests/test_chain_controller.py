@@ -38,6 +38,10 @@ class FakeAPI:
         self.hidden_reads = 0       # Filtered listings that do not yet show a new dispatch.
         self.overflow = False
         self.calls = []
+        self.return_run_id = False  # POST body carries workflow_run_id (newer API behaviour).
+        self.hidden_ids = set()     # Created runs that filtered listings never show.
+        self.id_404_reads = 0       # By-ID reads that 404 before the run becomes readable.
+        self.failed_posts = set()   # Workflows whose POST fails and creates nothing.
 
     def request(self, method, path, payload=None):
         self.calls.append((method, path))
@@ -49,13 +53,22 @@ class FakeAPI:
             title = ('Pages chain ' + inputs['chain_request_id'] if workflow == chain.PUBLISH
                      else 'Relay ' + inputs['relay_request_id'])
             item = record(100 + len(self.posts), workflow, title, 'queued')
+            if workflow in self.failed_posts:
+                raise chain.RelayError('api_transport_or_retry_exhausted')
             if not self.absent_response:
                 self.rows.append(item)
             if self.lost_response:
                 raise chain.RelayError('transport_unknown')
-            return {'workflow_run_id': item['id']}
+            return {'workflow_run_id': item['id']} if self.return_run_id else None
         if '/runs/' in parsed.path:
-            return next(r.copy() for r in self.rows if r['id'] == int(parsed.path.split('/')[-1]))
+            identifier = int(parsed.path.split('/')[-1])
+            if identifier > 100 and self.id_404_reads:
+                self.id_404_reads -= 1
+                raise chain.RelayError('api_http_404')
+            found = [r.copy() for r in self.rows if r['id'] == identifier]
+            if not found:
+                raise chain.RelayError('api_http_404')
+            return found[0]
         if parsed.path.endswith('/runs'):
             workflow = parsed.path.split('/')[-2]
             query = parse_qs(parsed.query)
@@ -68,6 +81,7 @@ class FakeAPI:
                 if self.posts and self.hidden_reads:
                     self.hidden_reads -= 1
                     rows = [r for r in rows if r['id'] <= 100]
+                rows = [r for r in rows if r['id'] not in self.hidden_ids]
             if self.overflow:
                 return {'total_count': 101, 'workflow_runs': rows}
             extra = int(self.incomplete)
@@ -408,6 +422,301 @@ class ControllerTests(unittest.TestCase):
              patch.object(chain, 'summary'), patch('sys.stderr', new_callable=io.StringIO):
             self.assertEqual(refresh_pages.main(['prepare']), 1)
             prepare.assert_not_called()
+
+
+class UnconfirmedDispatchTests(unittest.TestCase):
+    """Relay 43835501368 (2026-11-16): POST created Pages 43835544201 one second later,
+    but the created>= listing never showed it within the reconcile window."""
+    setUp = ControllerTests.setUp
+    sleep = ControllerTests.sleep
+
+    def pages_posts(self):
+        return [p for p in self.api.posts if chain.PUBLISH in p[0]]
+
+    def relay_posts(self):
+        return [p for p in self.api.posts if chain.RELAY in p[0]]
+
+    def keys(self):
+        return [k for k, _ in self.messages]
+
+    def message(self, key):
+        return next(v for k, v in self.messages if k == key)
+
+    def test_incident_post_accepted_but_never_listed_relay_continues(self):
+        self.api.hidden_ids = {101}
+        self.controller.relay()
+        self.assertEqual(len(self.pages_posts()), 1)   # Never resent.
+        self.assertEqual(len(self.relay_posts()), 1)
+        self.assertIn('POST accepted', self.message('update_unconfirmed'))
+        self.assertNotIn('update_run', self.keys())
+        self.assertIn('next_relay', self.keys())
+        self.assertEqual(self.elapsed, 600)             # Reconcile stayed inside the window.
+
+    def test_listing_appears_late_within_relay_round(self):
+        self.api.hidden_reads = 4
+        self.controller.relay()
+        self.assertEqual(self.message('update_run'), 101)
+        self.assertIn(('dispatch_confirmed_after_reads', 5), self.messages)
+        self.assertNotIn('update_unconfirmed', self.keys())
+        self.assertEqual(len(self.pages_posts()), 1)
+
+    def test_post_failure_creates_nothing_and_relay_continues(self):
+        self.api.failed_posts = {chain.PUBLISH}
+        self.controller.relay()
+        self.assertEqual(len(self.pages_posts()), 1)
+        self.assertIn('POST result unknown', self.message('update_unconfirmed'))
+        self.assertIn('next_relay', self.keys())
+
+    def test_next_relay_unconfirmed_does_not_resend_and_still_fails_visibly(self):
+        self.api.hidden_ids = {102}
+        with self.assertRaisesRegex(chain.Unconfirmed, 'dispatch_unconfirmed_no_resend'):
+            self.controller.relay()
+        self.assertEqual(len(self.relay_posts()), 1)
+        self.assertIn('pending behind the weather-relay lock', self.message('next_relay_unconfirmed'))
+        self.assertEqual(self.message('next_request'), 'r10a1')
+        self.assertEqual(self.message('update_run'), 101)
+        self.assertLessEqual(self.elapsed, 600 + chain.RECONCILE_BUDGET)
+
+    def test_next_relay_post_failure_is_reported_and_not_resent(self):
+        self.api.failed_posts = {chain.RELAY}
+        with self.assertRaises(chain.Unconfirmed):
+            self.controller.relay()
+        self.assertEqual(len(self.relay_posts()), 1)
+        self.assertIn('cron may be needed', self.message('next_relay_unconfirmed'))
+
+    def test_both_dispatches_unconfirmed_still_one_post_each(self):
+        self.api.hidden_ids = {101, 102}
+        with self.assertRaises(chain.Unconfirmed):
+            self.controller.relay()
+        self.assertEqual((len(self.pages_posts()), len(self.relay_posts())), (1, 1))
+        self.assertIn('update_unconfirmed', self.keys())
+
+    def test_cli_exit_codes_for_unconfirmed_dispatches(self):
+        self.api.hidden_ids = {101}
+        with patch.dict(os.environ, dict(GITHUB_REPOSITORY='owner/repo'), clear=True), \
+             patch.object(chain, 'GitHub', return_value=self.api), \
+             patch.object(chain, 'Controller', side_effect=lambda api, env: self.controller), \
+             patch.object(chain, 'summary'):
+            self.assertEqual(chain.main(['relay']), 0)  # Pages unconfirmed: relay handed off.
+        self.assertIn('next_relay', self.keys())
+        self.setUp()
+        self.api.hidden_ids = {102}
+        with patch.dict(os.environ, dict(GITHUB_REPOSITORY='owner/repo'), clear=True), \
+             patch.object(chain, 'GitHub', return_value=self.api), \
+             patch.object(chain, 'Controller', side_effect=lambda api, env: self.controller), \
+             patch.object(chain, 'summary') as output:
+            self.assertEqual(chain.main(['relay']), 1)  # Next relay unconfirmed: stays red.
+        output.assert_any_call('safe_stop', 'dispatch_unconfirmed_no_resend')
+
+    def next_round(self):
+        """Continue with the relay run that round one dispatched (ID 102)."""
+        self.api.hidden_ids = set()
+        self.env.update(GITHUB_RUN_ID='102', GITHUB_EVENT_NAME='workflow_dispatch', RELAY_REQUEST_ID='r10a1')
+        self.messages.clear()
+        self.elapsed = 0
+
+    def test_next_round_is_blocked_by_busy_unconfirmed_run(self):
+        self.api.hidden_ids = {101}
+        self.controller.relay()
+        self.next_round()
+        # In the incident the publisher was still queued/building ten minutes later.
+        for status in ('queued', 'in_progress', 'pending', 'waiting'):
+            with self.subTest(status=status):
+                next(r for r in self.api.rows if r['id'] == 101)['status'] = status
+                before = len(self.pages_posts())
+                self.controller.relay()
+                self.assertEqual(len(self.pages_posts()), before)
+                self.assertIn('busy', self.keys())
+                self.api.rows = [r for r in self.api.rows if r['id'] <= 102]
+                self.api.posts = self.api.posts[:2]
+                self.messages.clear()
+                self.elapsed = 0
+
+    def test_next_round_waits_cadence_after_finished_unconfirmed_run(self):
+        self.api.hidden_ids = {101}
+        self.controller.relay()
+        self.next_round()
+        finished = next(r for r in self.api.rows if r['id'] == 101)
+        finished.update(status='completed', created_at='2026-11-05T23:59:00+00:00')
+        posted_at = []
+        original = self.api.request
+        def track(method, path, payload=None):
+            if path.endswith(chain.PUBLISH + '/dispatches'):
+                posted_at.append(self.elapsed)
+            return original(method, path, payload)
+        self.api.request = track
+        self.controller.relay()
+        self.assertIn(('cadence_wait_seconds', 540.0), self.messages)
+        self.assertEqual(posted_at, [540])          # Not before 600 s after the unconfirmed run.
+        self.assertEqual(self.pages_posts()[-1][1]['inputs']['chain_request_id'], 'u102a1')
+
+    def test_unconfirmed_run_that_appears_twice_is_rejected_by_admission(self):
+        self.api.hidden_ids = {101}
+        self.controller.relay()
+        # If a second run with the same identity ever existed, the later one is skipped.
+        self.api.rows.append(record(150, chain.PUBLISH, 'Pages chain u10a1', 'in_progress'))
+        self.env.update(GITHUB_RUN_ID='150', GITHUB_EVENT_NAME='workflow_dispatch',
+                        CHAIN_REQUEST_ID='u10a1', SOURCE_MODE='auto', MODE='refresh', RETENTION_DAYS='15')
+        self.api.hidden_ids = set()
+        with self.assertRaisesRegex(chain.Stopped, 'duplicate_chain_request'):
+            self.controller.admit()
+
+    def test_run_id_from_post_confirms_without_listing(self):
+        self.api.return_run_id = True
+        self.api.hidden_ids = {101}
+        found = self.controller.dispatch(chain.PUBLISH, dict(chain_request_id='u10a1'), 'Pages chain u10a1', NOW)
+        self.assertEqual(found['id'], 101)
+        self.assertEqual(self.elapsed, 0)
+        self.assertIn(('dispatch_confirmed_by_id', 101), self.messages)
+        self.assertEqual(len(self.api.posts), 1)
+
+    def test_run_id_404_then_readable(self):
+        self.api.return_run_id = True
+        self.api.hidden_ids = {101}
+        self.api.id_404_reads = 2
+        found = self.controller.dispatch(chain.PUBLISH, dict(chain_request_id='u10a1'), 'Pages chain u10a1', NOW)
+        self.assertEqual(found['id'], 101)
+        self.assertEqual(self.elapsed, sum(chain.RECONCILE_DELAYS[:2]))
+        self.assertEqual(len(self.api.posts), 1)
+
+    def test_run_id_title_not_yet_evaluated_falls_back_to_listing(self):
+        self.api.return_run_id = True
+        original = self.api.request
+        def untitled(method, path, payload=None):
+            result = original(method, path, payload)
+            if path == '/actions/runs/101':
+                result['display_title'] = 'Publish validated snapshot to Pages'
+            return result
+        self.api.request = untitled
+        found = self.controller.dispatch(chain.PUBLISH, dict(chain_request_id='u10a1'), 'Pages chain u10a1', NOW)
+        self.assertEqual(found['id'], 101)
+        self.assertNotIn('dispatch_confirmed_by_id', self.keys())
+
+    def test_run_id_with_wrong_identity_stops_without_resend(self):
+        self.api.return_run_id = True
+        for field, value in (('head_branch', 'other'), ('event', 'push'), ('id', 999),
+                             ('created_at', '2020-01-01T00:00:00+00:00')):
+            with self.subTest(field=field):
+                self.setUp()
+                self.api.return_run_id = True
+                original = self.api.request
+                def tampered(method, path, payload=None, field=field, value=value, original=original):
+                    result = original(method, path, payload)
+                    if path == '/actions/runs/101':
+                        result[field] = value
+                    return result
+                self.api.request = tampered
+                with self.assertRaisesRegex(chain.RelayError, 'untrusted_dispatch_response'):
+                    self.controller.relay()
+                self.assertEqual(len(self.api.posts), 1)
+
+    def test_run_id_and_listing_disagree_is_ambiguous(self):
+        self.api.return_run_id = True
+        original = self.api.request
+        def other(method, path, payload=None):
+            result = original(method, path, payload)
+            if path == '/actions/runs/101':
+                result['display_title'] = 'not yet evaluated'
+            if '/runs?' in path and 'created=' in path:
+                for row in result['workflow_runs']:
+                    if row['id'] == 101:
+                        row['id'] = 103
+            return result
+        self.api.request = other
+        with self.assertRaisesRegex(chain.RelayError, 'ambiguous_dispatch_identity'):
+            self.controller.dispatch(chain.PUBLISH, dict(chain_request_id='u10a1'), 'Pages chain u10a1', NOW)
+        self.assertEqual(len(self.api.posts), 1)
+
+    def test_untrusted_listing_match_after_post_still_stops_relay(self):
+        original = self.api.request
+        def wrong(method, path, payload=None):
+            result = original(method, path, payload)
+            if '/runs?' in path and 'created=' in path:
+                for row in result['workflow_runs']:
+                    if row['id'] == 101:
+                        row['head_branch'] = 'other'
+            return result
+        self.api.request = wrong
+        with self.assertRaisesRegex(chain.RelayError, 'untrusted_matching_run'):
+            self.controller.relay()
+        self.assertEqual(len(self.api.posts), 1)       # No hand-off on integrity failure.
+
+    def test_transient_listing_failure_after_post_is_a_miss_not_a_stop(self):
+        original = self.api.request
+        failures = []
+        def flaky(method, path, payload=None):
+            if self.api.posts and '/runs?' in path and 'created=' in path and len(failures) < 2:
+                failures.append(path)
+                raise chain.RelayError('api_transport_or_retry_exhausted')
+            return original(method, path, payload)
+        self.api.request = flaky
+        self.controller.relay()
+        self.assertEqual(self.message('update_run'), 101)
+        self.assertEqual(len(self.pages_posts()), 1)
+        self.assertIn('next_relay', self.keys())
+
+    def test_reconcile_budget_bounds_slow_reads(self):
+        self.api.hidden_ids = {101}
+        original = self.controller.matching
+        reads = []
+        def slow(*args):
+            self.elapsed += 30          # Each listing burns 30 s in GET retries.
+            reads.append(args)
+            return original(*args)
+        self.controller.matching = slow
+        with self.assertRaises(chain.Unconfirmed):
+            self.controller.dispatch(chain.PUBLISH, dict(chain_request_id='u10a1'), 'Pages chain u10a1', NOW)
+        self.assertLess(len(reads) - 1, len(chain.RECONCILE_DELAYS) + 1)  # First read is the pre-POST check.
+        self.assertLessEqual(self.elapsed, 30 + chain.RECONCILE_BUDGET + 30 + max(chain.RECONCILE_DELAYS))
+
+    def test_explicit_post_rejection_fails_visibly_without_reconcile_or_resend(self):
+        original = self.api.request
+        def reject(method, path, payload=None):
+            if method == 'POST':
+                self.api.posts.append((path, payload))
+                raise chain.RelayError('api_http_422')
+            return original(method, path, payload)
+        self.api.request = reject
+        with self.assertRaisesRegex(chain.RelayError, 'dispatch_rejected_422'):
+            self.controller.relay()
+        self.assertEqual(len(self.api.posts), 1)
+        self.assertEqual(self.elapsed, 0)
+        self.assertNotIn('update_unconfirmed', self.keys())
+
+    def test_oversized_listing_after_post_is_not_a_transient_miss(self):
+        original = self.api.request
+        def flood(method, path, payload=None):
+            result = original(method, path, payload)
+            if self.api.posts and '/runs?' in path and 'created=' in path:
+                result['total_count'] = 101
+            return result
+        self.api.request = flood
+        with self.assertRaisesRegex(chain.TooManyRuns, 'incomplete_run_query'):
+            self.controller.relay()
+        self.assertEqual(len(self.api.posts), 1)
+        self.assertNotIn('update_unconfirmed', self.keys())
+
+    def test_child_observation_read_failure_still_hands_off(self):
+        original = self.api.request
+        def flaky(method, path, payload=None):
+            if path == '/actions/runs/101' and self.elapsed >= 600:
+                raise chain.RelayError('api_transport_or_retry_exhausted')
+            return original(method, path, payload)
+        self.api.request = flaky
+        self.controller.relay()
+        self.assertIn('not observed', self.message('update_observed_result'))
+        self.assertIn('next_relay', self.keys())
+
+    def test_child_observation_integrity_failure_still_stops(self):
+        original = self.api.request
+        def bad(method, path, payload=None):
+            if path == '/actions/runs/101' and self.elapsed >= 600:
+                raise chain.RelayError('api_http_403')
+            return original(method, path, payload)
+        self.api.request = bad
+        with self.assertRaisesRegex(chain.RelayError, 'api_http_403'):
+            self.controller.relay()
+        self.assertEqual(len(self.relay_posts()), 0)
 
 
 class TransportTests(unittest.TestCase):
