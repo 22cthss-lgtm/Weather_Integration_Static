@@ -21,6 +21,15 @@
 | `jma_targetTc_empty_20261115.json` | `https://www.jma.go.jp/bosai/typhoon/data/targetTc.json` | 2026-11-15 17:43 | 否（內容為 `[]`）|
 | `jma_extra_feed_no_vptw_cropped_20261115.xml` | `https://www.data.jma.go.jp/developer/xml/feed/extra.xml` | 2026-11-15 17:43 | **是**：241 筆條目只保留前 2 筆與最後 1 筆；原檔沒有任何 VPTW60 |
 
+| `noaa_avno_2026111106.txt` | `https://nomads.ncep.noaa.gov/pub/data/nccf/com/ens_tracker/prod/gfs.20261111/06/tctrack/avno.t06z.cyclone.trackatcfunix` | 2026-11-11 11:25（S2）| 否（WP31＝CEMPAKA、CP04＝PENA）|
+| `noaa_agfs_2026111106.txt` | `https://nomads.ncep.noaa.gov/pub/data/nccf/com/ens_tracker/prod/aigfs.20261111/06/tctrack/agfs.t06z.cyclone.trackatcfunix` | 2026-11-11 11:26（S2）| 否 |
+| `noaa_tcvitals_2026111118.txt` | `https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/gfs.20261111/18/atmos/gfs.t18z.syndata.tcvitals.tm00` | 2026-11-12 10:54（S3）| 否（18Z 檔內 JTWC 31W 的行是 12Z）|
+| `ecmwf_ifs_2026111012_oper.bufr` | `https://data.ecmwf.int/forecasts/20261110/12z/ifs/0p25/oper/20261110120000-360h-oper-tf.bufr` | 2026-11-11 11:29（S2）| 否（38W CEMPAKA、04C PENA 與 13 個 70 號以上的系統）|
+| `ecmwf_aifs_2026111012_oper.bufr` | `https://data.ecmwf.int/forecasts/20261110/12z/aifs-single/0p25/oper/20261110120000-360h-oper-tf.bufr` | 2026-11-11 11:29（S2）| 否 |
+| `ecmwf_ifs_2026111118_oper.bufr` | `https://data.ecmwf.int/forecasts/20261111/18z/ifs/0p25/oper/20261111180000-144h-oper-tf.bufr` | 2026-11-12 10:25（S2 補測）| 否（31W CEMPAKA、04C PENA 都只有分析、沒有預報步）|
+
+NOAA、ECMWF 的檔案只保存回應本體（HTTP 標頭與 CDN 資訊沒有放入）。S8 以 ecCodes（S2 的本機 venv，不是專案相依）逐值比對三個 BUFR 檔中保留下來的 4 條路徑（位置、氣壓、風速，共 35 點），與 `pybufrkit` 的解碼結果完全相同。
+
 CWA 在 2026-11-15 17:43 的無系統回應與 `cwa_datastore_cempaka.json` **逐位元相同**（CEMPAKA 消散四天後仍原樣提供），所以沒有另存一份。
 
 ## 人工構造的資料
@@ -35,4 +44,6 @@ CWA 在 2026-11-15 17:43 的無系統回應與 `cwa_datastore_cempaka.json` **�
 
 - **CWA**：提供機關／交通部中央氣象署，資料名稱「熱帶氣旋路徑」（W-C0034-005），依政府資料開放授權條款第 1 版。
 - **JMA**：出典：気象庁ホームページ（<https://www.jma.go.jp/>）。防災情報 XML 電文與 bosai JSON，依公共データ利用規約（第 1.0 版）。裁剪過的檔案為「気象庁の資料を加工して作成」。
+- **NOAA／NWS**：含 NOAA／NWS（NCEP）資料；依 17 U.S.C. §403 不受著作權保護；非 NOAA／NWS 背書。
+- **ECMWF**：Copyright ECMWF；依 CC BY 4.0 授權（ECMWF open data）。本目錄的 BUFR 檔未經修改；測試把它們轉換成路徑資料並篩選系統。
 - **JTWC**：含美國海軍 Joint Typhoon Warning Center 的資料；依 17 U.S.C. §403 屬公有領域，不受著作權保護。RSS 內含官方公開的聯絡信箱，原樣保留。

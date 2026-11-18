@@ -208,7 +208,8 @@ class WhitelistTests(unittest.TestCase):
         self.assertEqual(len(IMAGE_TYPES), 12)
         self.assertEqual(len(REQUIRED), 14)
         for name in ('tropical/index.json', 'tropical/official/index.json.bak', 'tropical/official/x.json',
-                     'tropical/models/index.json', 'tropical/official/../official/index.json'):
+                     'tropical/ensemble/index.json',  # S9; tropical/models/ is allowed since S8
+                     'tropical/official/../official/index.json'):
             self.assertFalse(allowed_path(name), name)
 
     def test_storm_files_are_allowed_by_rule_and_never_required(self):

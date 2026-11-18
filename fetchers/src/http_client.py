@@ -29,7 +29,20 @@ def source_name(url):
     }.items():
         if any(host == suffix or host.endswith('.' + suffix) for suffix in suffixes):
             return source
-    return host
+    # Exact hosts only (design.md 11e E7): other hosts under these domains keep
+    # their own host-named budget.
+    return EXACT_HOSTS.get(host, host)
+
+
+EXACT_HOSTS = {'nomads.ncep.noaa.gov': 'noaa', 'data.ecmwf.int': 'ecmwf'}
+# (requests, seconds) per source and run; anything else gets DEFAULT_LIMITS.
+# cwa and the default are the values used before the table (design.md 5.4).
+SOURCE_LIMITS = {'cwa': (600, 240), 'noaa': (200, 420), 'ecmwf': (40, 240)}
+DEFAULT_LIMITS = (80, 90)
+
+
+def source_limits(name):
+    return SOURCE_LIMITS.get(name, DEFAULT_LIMITS)
 
 
 class HttpPolicy:
@@ -45,8 +58,8 @@ class HttpPolicy:
         with self.lock:
             now = self.clock()
             state = self.sources.setdefault(name, {'start': now, 'count': 0, 'blocked': False})
-            seconds = self.max_seconds or (240 if name == 'cwa' else 90)
-            requests_limit = self.max_requests or (600 if name == 'cwa' else 80)
+            seconds = self.max_seconds or source_limits(name)[1]
+            requests_limit = self.max_requests or source_limits(name)[0]
             remaining = seconds - (now - state['start'])
             if state['blocked'] or remaining <= 0 or state['count'] >= requests_limit:
                 raise SourceBudgetExceeded('Source request/time budget exhausted')
@@ -57,7 +70,7 @@ class HttpPolicy:
         name = source_name(url)
         with self.lock:
             state = self.sources[name]
-            limit = self.max_seconds or (240 if name == 'cwa' else 90)
+            limit = self.max_seconds or source_limits(name)[1]
             if self.clock() - state['start'] + seconds >= limit:
                 state['blocked'] = True
                 raise SourceBudgetExceeded('Source time budget exhausted')
@@ -66,7 +79,7 @@ class HttpPolicy:
     def check_deadline(self, url):
         with self.lock:
             state = self.sources[source_name(url)]
-            limit = self.max_seconds or (240 if source_name(url) == 'cwa' else 90)
+            limit = self.max_seconds or source_limits(source_name(url))[1]
             if self.clock() - state['start'] >= limit:
                 state['blocked'] = True
                 raise SourceBudgetExceeded('Source time budget exhausted')

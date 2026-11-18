@@ -67,6 +67,19 @@ def publish_image(image_type, payloads, output_path):
 def atomic_write_json(data, output_path, prefix='.data-'):
     """Serialize before touching the destination; use one atomic writer for all resources."""
     content = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + '\n'
+    _atomic_write_text(content, output_path, prefix)
+    return data
+
+
+def atomic_write_compact_json(data, output_path, prefix='.data-'):
+    """Same atomic writer without indentation, for the large tropical model
+    files whose size limits assume the compact layout (design.md 1.2, 11e E2)."""
+    content = json.dumps(data, ensure_ascii=False, separators=(',', ':'), allow_nan=False) + '\n'
+    _atomic_write_text(content, output_path, prefix)
+    return data
+
+
+def _atomic_write_text(content, output_path, prefix):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = None
@@ -83,4 +96,3 @@ def atomic_write_json(data, output_path, prefix='.data-'):
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-    return data

@@ -432,3 +432,164 @@ def validate_storm_file(path, data):
     except Exception:  # noqa: BLE001 - only ValueError may leave a tropical validator.
         raise ValueError('Invalid tropical storm file') from None
     return data
+
+
+# --- tropical/models/ (design.md 1.6, 1.7, 6.1, 11e; S8) ---------------------
+
+MODELS_INDEX_PATH = 'tropical/models/index.json'
+MODELS = ('aifs', 'aigfs', 'gfs', 'ifs')  # alphabetical: the order of every list
+MODEL_PROVIDER = {'gfs': 'NOAA', 'aigfs': 'NOAA', 'ifs': 'ECMWF', 'aifs': 'ECMWF'}
+MODEL_SOURCES = ('noaa', 'ecmwf')
+SOURCE_STATES = ('ok', 'failed', 'idle')
+WIND_UNIT = {'NOAA': 'kt', 'ECMWF': 'm/s'}
+MODEL_MATCH = {'NOAA': ('jtwc_id', 'tcvitals', 'position'), 'ECMWF': ('name', 'position')}
+SOURCE_ID = {'NOAA': re.compile(r'(WP|CP|EP)[0-9]{2}'), 'ECMWF': re.compile(r'[0-9]{2}[A-Z]')}
+CYCLE = re.compile(r'[0-9]{8}(00|06|12|18)')
+MODELS_FILE = re.compile(r'tropical/models/storms/([0-9]{4}-(?:jma|jtwc|cwa)-[a-z0-9]{1,8})/([0-9]{8}(?:00|06|12|18))\.json')
+MAX_CHECKED_CYCLES = 8
+MAX_MODEL_CYCLES = 4
+MAX_TRACK_POINTS = 81
+MAX_MODEL_TAU_H = 480
+MATCH_BASIS = re.compile(r'[0-9]{4}-(?:jma|jtwc|cwa)-[a-z0-9]{1,8}\|(?:[0-9]{2}[WCE])?\|(?:[A-Z][A-Z \-]{0,39})?')
+
+
+def cycle_time(cycle):
+    """``YYYYMMDDHH`` (HH in 00/06/12/18) to an aware UTC datetime."""
+    if type(cycle) is not str or not CYCLE.fullmatch(cycle):
+        _fail('Invalid cycle')
+    try:
+        return datetime.strptime(cycle, '%Y%m%d%H').replace(tzinfo=timezone.utc)
+    except ValueError:
+        _fail('Invalid cycle')
+
+
+def format_cycle(moment):
+    return moment.astimezone(timezone.utc).strftime('%Y%m%d%H')
+
+
+def _model_list(value):
+    if (type(value) is not list or not value
+            or any(type(model) is not str or model not in MODELS for model in value)
+            or value != sorted(set(value))):
+        _fail('Invalid model list')
+
+
+def _models_index(data):
+    _exact(data, ('schema_version', 'fetched_at', 'sources', 'match_basis', 'checked', 'storms'))
+    if type(data['schema_version']) is not int or data['schema_version'] != 1:
+        _fail('Unsupported tropical schema version')
+    parse_stamp(data['fetched_at'])
+    _exact(data['sources'], MODEL_SOURCES)
+    for source in MODEL_SOURCES:
+        value = data['sources'][source]
+        _exact(value, ('state', 'error_code'))
+        if type(value['state']) is not str or value['state'] not in SOURCE_STATES:
+            _fail('Invalid source state')
+        code = value['error_code']
+        if value['state'] == 'failed':
+            if type(code) is not str or code not in SAFE_ERROR_CODES:
+                _fail('Failed source needs a safe error code')
+        elif code is not None:
+            _fail('Only a failed source has an error code')
+    basis = data['match_basis']
+    if (type(basis) is not list or len(basis) > MAX_STORMS
+            or any(type(item) is not str or not MATCH_BASIS.fullmatch(item) for item in basis)
+            or basis != sorted(set(basis))):
+        _fail('Invalid match_basis')
+    checked = data['checked']
+    if type(checked) is not dict or len(checked) > MAX_CHECKED_CYCLES:
+        _fail('Invalid checked cycles')
+    for cycle, models in checked.items():
+        cycle_time(cycle)
+        _model_list(models)
+    storms = data['storms']
+    if type(storms) is not dict or len(storms) > MAX_STORMS:
+        _fail('Invalid model storms')
+    for identity, storm in storms.items():
+        if type(identity) is not str or not CYCLONE_ID.fullmatch(identity):
+            _fail('Invalid cyclone_id')
+        _exact(storm, ('bridge', 'cycles'))
+        _exact(storm['bridge'], ('jtwc',))
+        bridge = storm['bridge']['jtwc']
+        if bridge is not None and (type(bridge) is not str or not ID_PATTERNS['jtwc'].fullmatch(bridge)):
+            _fail('Invalid bridged JTWC identifier')
+        cycles = storm['cycles']
+        # 11e E16: an entry without cycles exists only to keep a tcvitals bridge.
+        if type(cycles) is not list or len(cycles) > MAX_MODEL_CYCLES or (not cycles and bridge is None):
+            _fail('Invalid model cycles')
+        previous = None
+        for item in cycles:
+            _exact(item, ('cycle', 'models'))
+            moment = cycle_time(item['cycle'])
+            if previous is not None and moment <= previous:
+                _fail('Model cycles must increase')
+            previous = moment
+            _model_list(item['models'])
+
+
+def validate_models_index(data):
+    """Validate ``tropical/models/index.json``; raises only ``ValueError``."""
+    try:
+        _models_index(data)
+    except Exception:  # noqa: BLE001 - only ValueError may leave a tropical validator.
+        raise ValueError('Invalid tropical models index') from None
+    return data
+
+
+def _track(track):
+    if type(track) is not list or not 1 <= len(track) <= MAX_TRACK_POINTS:
+        _fail('Invalid model track')
+    previous = None
+    for point in track:
+        if type(point) is not list or len(point) != 5:
+            _fail('Invalid model track point')
+        tau, lat, lon, pressure, wind = point
+        if type(tau) is not int or not 0 <= tau <= MAX_MODEL_TAU_H or tau % 6:
+            _fail('Invalid tau_h')
+        if previous is not None and tau <= previous:
+            _fail('tau_h must increase')
+        previous = tau
+        _number(lat, -90, 90)
+        _number(lon, -180, 180, high_exclusive=True)
+        _number(pressure, 850, 1100, optional=True)
+        _number(wind, 0, 200, optional=True)
+
+
+def _models_file(path, data):
+    matched = MODELS_FILE.fullmatch(path) if type(path) is str else None
+    if not matched:
+        _fail('Not a tropical models file path')
+    _exact(data, ('schema_version', 'cyclone_id', 'cycle', 'init_time', 'fetched_at', 'models'))
+    if type(data['schema_version']) is not int or data['schema_version'] != 1:
+        _fail('Unsupported tropical schema version')
+    if data['cyclone_id'] != matched[1] or data['cycle'] != matched[2]:
+        _fail('cyclone_id or cycle does not match the path')
+    if parse_stamp(data['init_time']) != cycle_time(data['cycle']):
+        _fail('init_time does not match the cycle')
+    parse_stamp(data['fetched_at'])
+    models = data['models']
+    if type(models) is not dict or not models or any(type(m) is not str or m not in MODELS for m in models):
+        _fail('Invalid models')
+    for model, value in models.items():
+        _exact(value, ('provider', 'source_id', 'match', 'wind_unit', 'track'))
+        provider = MODEL_PROVIDER[model]
+        if value['provider'] != provider or value['wind_unit'] != WIND_UNIT[provider]:
+            _fail('Invalid provider or wind unit')
+        if type(value['source_id']) is not str or not SOURCE_ID[provider].fullmatch(value['source_id']):
+            _fail('Invalid source_id')
+        if type(value['match']) is not str or value['match'] not in MODEL_MATCH[provider]:
+            _fail('Invalid model match')
+        _track(value['track'])
+
+
+def is_models_file(path):
+    return type(path) is str and MODELS_FILE.fullmatch(path) is not None
+
+
+def validate_models_file(path, data):
+    """Validate ``tropical/models/storms/{id}/{cycle}.json`` (compact layout)."""
+    try:
+        _models_file(path, data)
+    except Exception:  # noqa: BLE001 - only ValueError may leave a tropical validator.
+        raise ValueError('Invalid tropical models file') from None
+    return data

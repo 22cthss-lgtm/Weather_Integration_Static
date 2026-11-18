@@ -14,7 +14,9 @@ from uuid import uuid4
 
 from .publication import GROUPS, validate_image, atomic_write_json
 from .rainfall_rankings import METRICS
-from .tropical_contract import OFFICIAL_INDEX_PATH, is_storm_file, validate_official_index, validate_storm_file
+from .tropical_contract import (MODELS_INDEX_PATH, OFFICIAL_INDEX_PATH, is_models_file, is_storm_file,
+                                validate_models_file, validate_models_index, validate_official_index,
+                                validate_storm_file)
 
 IMAGE_TYPES = ('sst', 'temperature', 'weather_chart', '850hpa', 'tchp',
                *GROUPS, 'radar', 'satellite', 'rainfall')
@@ -25,7 +27,8 @@ IMAGE_FIELDS = {'image_type', 'source', 'title', 'image_url', 'source_url', 'ima
 
 def allowed_path(name):
     # Tropical cyclone resources are allowed but never required (design.md 4.1).
-    return name in REQUIRED or name == OFFICIAL_INDEX_PATH or is_storm_file(name) or bool(re.fullmatch(
+    return name in REQUIRED or name in (OFFICIAL_INDEX_PATH, MODELS_INDEX_PATH) or is_storm_file(name) \
+        or is_models_file(name) or bool(re.fullmatch(
         r'images/(radar|satellite|rainfall)/history/\d{4}-\d{2}-\d{2}\.json', name))
 
 
@@ -188,6 +191,10 @@ def validate_resource(path, data):
             validate_official_index(data)
         elif is_storm_file(path):
             validate_storm_file(path, data)
+        elif path == MODELS_INDEX_PATH:
+            validate_models_index(data)
+        elif is_models_file(path):
+            validate_models_file(path, data)
         else:
             raise ValueError('Unapproved public resource path')
     except (KeyError, TypeError, RuntimeError, OverflowError, AttributeError):

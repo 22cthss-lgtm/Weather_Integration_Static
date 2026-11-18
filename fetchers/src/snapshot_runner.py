@@ -10,7 +10,8 @@ from uuid import uuid4
 from .http_client import http_scope
 from .publication import atomic_write_json
 from .snapshots import REQUIRED, read_resources, export_snapshot
-from .tropical_contract import OFFICIAL_INDEX_PATH, STORM_FILE, validate_official_index
+from .tropical_contract import (MODELS_FILE, MODELS_INDEX_PATH, OFFICIAL_INDEX_PATH, STORM_FILE,
+                                validate_models_index, validate_official_index)
 from .update_runner import FileLock
 
 
@@ -55,26 +56,23 @@ def _prune_past_history(candidate, today):
     return pruned
 
 
-def _prune_tropical(candidate):
-    """Remove official storm files whose system the valid official index no longer lists.
+def _prune_prefix(candidate, index_path, validate, folder, pattern, keep):
+    """Delete exact ``pattern`` files under ``folder`` that ``keep(match, index)`` rejects.
 
-    design.md 3.6: only exact ``tropical/official/storms/{id}/(analysis|forecast).json``
-    paths are touched; a missing or invalid index removes nothing. No network.
-    Models and ensemble prefixes join in S8/S9.
+    An unreadable or invalid index removes nothing under this prefix. No network.
     """
     try:
-        index = validate_official_index(json.loads((candidate / OFFICIAL_INDEX_PATH).read_bytes()))
+        index = validate(json.loads((candidate / index_path).read_bytes()))
     except Exception:  # noqa: BLE001 - unreadable or invalid: keep the whole prefix.
         return []
-    listed = {storm['cyclone_id'] for storm in index['storms']}
-    folder = candidate / 'tropical' / 'official' / 'storms'
+    folder = candidate / folder
     if not folder.is_dir() or folder.is_symlink():
         return []
     pruned = []
     for path in sorted(folder.rglob('*')):
         name = path.relative_to(candidate).as_posix()
-        match = STORM_FILE.fullmatch(name)
-        if match and path.is_file() and not path.is_symlink() and match[1] not in listed:
+        match = pattern.fullmatch(name)
+        if match and path.is_file() and not path.is_symlink() and not keep(match, index):
             path.unlink()
             pruned.append(name)
     for name in pruned:
@@ -82,6 +80,25 @@ def _prune_tropical(candidate):
         if directory.parent == folder and directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()  # Only the now-empty storms/{id}/ itself.
     return pruned
+
+
+def _prune_tropical(candidate):
+    """Remove tropical files that their own valid index no longer lists (design.md 3.6).
+
+    Official: ``tropical/official/storms/{id}/(analysis|forecast).json`` whose system
+    is not in the official index. Models (S8): ``tropical/models/storms/{id}/{cycle}.json``
+    whose (system, cycle) is not in the models index. Each prefix is judged by its
+    own index only; a missing or invalid index removes nothing under that prefix.
+    The ensemble prefix joins in S9.
+    """
+    official = _prune_prefix(
+        candidate, OFFICIAL_INDEX_PATH, validate_official_index, 'tropical/official/storms', STORM_FILE,
+        lambda match, index: match[1] in {storm['cyclone_id'] for storm in index['storms']})
+    models = _prune_prefix(
+        candidate, MODELS_INDEX_PATH, validate_models_index, 'tropical/models/storms', MODELS_FILE,
+        lambda match, index: any(item['cycle'] == match[2]
+                                 for item in index['storms'].get(match[1], {}).get('cycles', [])))
+    return official + models
 
 
 def run_candidate(products, seed_data, store, update, *, allow_empty=False, history_today=None,

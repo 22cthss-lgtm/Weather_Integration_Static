@@ -149,6 +149,16 @@
         2400,
         3600
       ]
+    },
+    "tropical_models": {
+      "mode": "interval",
+      "interval_seconds": 3600,
+      "retry_delays_seconds": [
+        1800,
+        3600,
+        7200,
+        14400
+      ]
     }
   }
 }
