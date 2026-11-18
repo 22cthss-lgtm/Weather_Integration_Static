@@ -1,14 +1,18 @@
 from datetime import datetime, timedelta
 from dataclasses import replace
 from pathlib import Path
-import copy,json,sys,tempfile,unittest
+import copy
+import json
+import sys
+import tempfile
+import unittest
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from src.current_day import publish_current_history
 from src.history_reconciliation import history_scope
 from src.services.cwa_service import CWAService
-from src.snapshots import validate_resource,export_snapshot,restore_snapshot
+from src.snapshots import validate_resource,export_snapshot
 
 NOW=datetime.fromisoformat('2026-11-03T12:00:00+08:00')
 POLICY={'interval_seconds':3600,'max_rechecks':3,'max_slots_per_run':12,'current_day_only':True}

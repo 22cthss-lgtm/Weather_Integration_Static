@@ -188,7 +188,6 @@ class GroupServiceTests(unittest.TestCase):
                 self.assertEqual(output.read_bytes(), b'previous complete group')
 
     def test_cimss_partial_source_failure_keeps_previous_group(self):
-        import update_images as runner
         for kind, method, page_method, page in (
             ('cimss_wind_analysis', 'fetch_wind_analysis', 'fetch_page_html', 'westpac/winds/wgmsshr.GIF'),
             ('cimss_steering_flow', 'fetch_steering_flow', 'fetch_specific_page_html', 'wgmsdlm1.GIF'),

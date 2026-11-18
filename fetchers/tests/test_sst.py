@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 FETCHERS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FETCHERS))
-from src.services.ocean_service import OceanService
+from src.services.ocean_service import OceanService  # noqa: E402 (needs sys.path above)
 
 
 class OceanServiceTests(unittest.TestCase):

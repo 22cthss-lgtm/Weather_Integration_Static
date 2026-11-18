@@ -87,7 +87,7 @@ class WriterTests(unittest.TestCase):
     def test_registered_services_publish_only_requested_product(self):
         import update_images as runner
         from src.services.base import ImagePayload
-        for kind, (service_class, method) in runner.PRODUCTS.items():
+        for kind, (_service_class, method) in runner.PRODUCTS.items():
             with self.subTest(kind=kind), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
                 image_time = '2026-10-20' if kind in ('sst', 'tchp') else '2026-10-22T08:00:00+08:00'
                 item = ImagePayload(kind, 'SOURCE', 'Title', 'https://example.com/image.png',

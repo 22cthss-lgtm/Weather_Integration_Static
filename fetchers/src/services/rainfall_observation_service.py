@@ -112,17 +112,17 @@ class RainfallObservationService:
                 verify=False,
             )
             response.raise_for_status()
-        except requests.RequestException as exc:
+        except requests.RequestException:
             raise RuntimeError("CWA rainfall API request failed.") from None
 
         try:
             payload = response.json()
-        except ValueError as exc:
+        except ValueError:
             raise RuntimeError("CWA rainfall API response was not valid JSON.") from None
 
         try:
             return parse_cwa_rainfall_response(payload, fetched_at=fetched_at)
-        except ValueError as exc:
+        except ValueError:
             raise RuntimeError("Unexpected CWA rainfall response format.") from None
 
     def refresh_observations(self) -> int:

@@ -121,7 +121,7 @@ export async function refreshImage(type) {
 }
 
 async function parseJson(response, fallbackMessage) {
-  let payload = null;
+  let payload;
 
   try {
     payload = await response.json();

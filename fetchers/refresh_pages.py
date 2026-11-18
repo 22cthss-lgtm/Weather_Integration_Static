@@ -35,7 +35,7 @@ def main(argv=None):
                 require_enabled()
                 if not os.environ.get('CWA_API_KEY', '').strip():
                     raise ValueError('CWA_API_KEY is required for refreshing all website resources')
-                from update_images import registered_products, update_image
+                from update_images import update_image
                 update = update_image
             state_path = Path(os.environ['RUNNER_TEMP']) / 'source-state.json' if os.environ.get('RUNNER_TEMP') else None
             state_document = None

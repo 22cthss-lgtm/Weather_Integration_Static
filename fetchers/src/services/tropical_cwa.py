@@ -61,7 +61,7 @@ def _radii(fix):
         circle = fix.get(field)
         if circle is None:
             continue
-        item = optional(lambda: _circle(circle, threshold))
+        item = optional(lambda: _circle(circle, threshold))  # noqa: B023 (called immediately)
         if item is not None:
             radii.append(item)
     return radii
@@ -187,7 +187,7 @@ def _record(entry):
                 'radii': _radii(fix)}}
     # CWA provides the whole past track itself (design.md 1.4 "source").
     # A past point that cannot be read is left out; it never fails the record.
-    track = (optional(lambda: dict({'analysis_time': stamp(when)}, **_point(item))) for when, item in stamped[:-1])
+    track = (optional(lambda: dict({'analysis_time': stamp(when)}, **_point(item))) for when, item in stamped[:-1])  # noqa: B023 (called immediately)
     record['source_track'] = [point for point in track if point is not None][-MAX_PAST_TRACK:]
     # An unusable forecast part means no forecast for this report.
     record['forecast'] = optional(lambda: _forecast(entry))

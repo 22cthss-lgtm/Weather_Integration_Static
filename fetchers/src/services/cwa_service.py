@@ -231,7 +231,7 @@ class CWAService(BaseImageService):
             slots.append(candidate_time)
             candidate_time += timedelta(minutes=self.satellite_slot_minutes)
         return slots
-        
+
     def _read_index(self, url):
         """A missing/changed metadata route may use another existing route.
 

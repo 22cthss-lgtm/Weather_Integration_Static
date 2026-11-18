@@ -190,7 +190,7 @@ def validate_resource(path, data):
             validate_storm_file(path, data)
         else:
             raise ValueError('Unapproved public resource path')
-    except (KeyError, TypeError, RuntimeError, OverflowError, AttributeError) as exc:
+    except (KeyError, TypeError, RuntimeError, OverflowError, AttributeError):
         raise ValueError('Invalid public JSON resource') from None
     return data
 

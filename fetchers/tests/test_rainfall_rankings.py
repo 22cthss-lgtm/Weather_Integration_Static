@@ -1,6 +1,3 @@
-from contextlib import redirect_stderr, redirect_stdout
-import io
-import json
 import math
 import os
 from pathlib import Path
@@ -9,7 +6,7 @@ import sys
 import tempfile
 import traceback
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

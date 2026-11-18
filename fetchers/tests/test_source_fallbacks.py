@@ -1,6 +1,6 @@
 """Offline failure-path contracts. No requests may escape the fake transport."""
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 import json
 from pathlib import Path
 import sys
@@ -291,7 +291,6 @@ class NoAlternativeSourceTests(unittest.TestCase):
 
     def test_rankings_api_failure_keeps_valid_previous_bytes(self):
         from src.rainfall_rankings import update_rankings
-        from src.services.rainfall_observation_service import RainfallObservationService
         for r in (reply(500), reply(text='not json'), reply(text='{"records":{}}')):
             with self.subTest(code=r.status_code), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
                 output = Path(root) / 'latest.json'

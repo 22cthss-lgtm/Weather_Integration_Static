@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from http.client import HTTPException
 import json
 import os
-from pathlib import Path
 import re
 import time
 from urllib.error import HTTPError, URLError

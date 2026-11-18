@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import tropical_testing as tt
 from tropical_testing import (CWA_URL, JMA_BULLETIN, JMA_FEED, JMA_LONG, JMA_TARGET, JTWC_PRODUCT, JTWC_RSS,
-                              NOW, SECRET, FakeResponse, FakeTransport, fixture, hours, quiet_policy)
+                              NOW, SECRET, FakeTransport, fixture, hours, quiet_policy)
 
 from src.http_client import http_scope
 from src.services import tropical_cwa, tropical_jma, tropical_jtwc

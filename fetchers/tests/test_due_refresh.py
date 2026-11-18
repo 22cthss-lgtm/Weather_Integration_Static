@@ -90,12 +90,12 @@ class DueRefreshTests(unittest.TestCase):
 
     def test_unchanged_check_is_saved_and_next_run_skips_without_new_package(self):
         from src.due_refresh import prepare_due, load_policy
-        from src.scheduling import new_state, default_tasks
+        from src.scheduling import default_tasks
         from src.pages_package import unpack_snapshot
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
             root = Path(directory)
             package = self.seed(root)
-            selected = unpack_snapshot(root/'input.zip', package['sha256'], root/'unpacked')
+            unpack_snapshot(root/'input.zip', package['sha256'], root/'unpacked')
             now = datetime.now(timezone.utc)
             tasks = {'sst': default_tasks()['sst']}
             calls = []
