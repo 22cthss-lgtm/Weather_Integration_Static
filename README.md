@@ -6,7 +6,7 @@ A static weather dashboard that gathers observation and analysis products from s
 
 > **中文簡介**
 > 這是一個把多個官方氣象機構的觀測與分析圖資整理在同一處的靜態網站。資料由 Python 程式抓取並整理成 JSON，透過 GitHub Actions 定時更新、驗證後部署到 GitHub Pages；前端以 React 讀取這些靜態 JSON，圖片則直接從官方網址載入，不另存圖檔。
-> 目前提供 12 種圖資（臺灣即時觀測、綜觀天氣分析、海洋與颱風潛勢、極區海冰）與雨量排行。另有開發中的「熱帶系統專區」（西北太平洋，整合 CWA、JMA、JTWC 的官方路徑），尚未上線。
+> 目前提供 12 種圖資（臺灣即時觀測、綜觀天氣分析、海洋與颱風潛勢、極區海冰）與雨量排行。另有「熱帶系統專區」（西北太平洋）：整合 CWA、JMA、JTWC 官方路徑的總覽與個別系統頁已上線，數值模式路徑、Ensemble 與衛星圖等仍在開發中。
 
 ---
 
@@ -23,15 +23,15 @@ The home page groups the products into four sections. Each card opens a detail p
 
 Images are always loaded from the agencies' own URLs; the site stores only metadata (URLs, times and hashes), never the image files themselves.
 
-### In development: Tropical Cyclone Center (Western North Pacific)
+### Tropical Cyclone Center (Western North Pacific) — partly live, still in development
 
-Developed on the `feature/tropical-cyclone` branch and **not yet live**.
+The official-track part is live at [`/tropical`](https://22cthss-lgtm.github.io/weather-observation-dashboard/tropical/). Model tracks, ensemble (spaghetti) plots and satellite imagery are still being developed on the `feature/tropical-cyclone` branch.
 
 - An overview of active systems, combining the official advisories of CWA, JMA and JTWC. Systems are matched by agency number, name and position.
 - A page per storm with each agency's analysis side by side, an interactive map of the official past and forecast tracks (Leaflet with a bundled Natural Earth land outline, no external map tiles), and a timeline aligned to the agencies' real forecast valid times.
 - Display rules: intensities are shown only in the units and averaging periods each agency gives, never converted or compared across agencies. The timeline never interpolates, and forecasts from different initialisation times are labelled as such.
 
-Design notes and the stage-by-stage plan are in [`docs/tropical-cyclone/`](https://github.com/22cthss-lgtm/weather-observation-dashboard/tree/feature/tropical-cyclone/docs/tropical-cyclone) on the feature branch.
+Design notes and the stage-by-stage plan are in [`docs/tropical-cyclone/`](docs/tropical-cyclone/).
 
 ---
 
@@ -59,7 +59,7 @@ More detail: [`docs/data-flow.md`](docs/data-flow.md) (data flow, failure handli
 ## Tech stack
 
 - **Data:** Python 3.13 (tested in CI; the fetchers support 3.10+). Dependencies are `requests` and `python-dotenv`.
-- **Frontend:** React 18, React Router 6, Vite 5. Leaflet is used on the tropical-cyclone branch.
+- **Frontend:** React 18, React Router 6, Vite 5, and Leaflet for the tropical-cyclone track map.
 - **Automation:** GitHub Actions for the relay, publishing, CI, CodeQL and Dependabot; hosting on GitHub Pages.
 - **Quality:** Python `unittest`, Vitest with Testing Library, ESLint and Ruff, all run in CI on every push and pull request.
 
@@ -129,7 +129,7 @@ This site redistributes metadata and links to products published by:
 - Korea Meteorological Administration (KMA)
 - Cooperative Institute for Meteorological Satellite Studies (CIMSS), University of Wisconsin–Madison
 - National Snow and Ice Data Center (NSIDC)
-- Tropical Cyclone Center, in development: Joint Typhoon Warning Center (JTWC); land outline from Natural Earth (public domain)
+- Tropical Cyclone Center: Joint Typhoon Warning Center (JTWC), alongside CWA and JMA above; land outline from Natural Earth (public domain)
 
 All images and data remain the property of their respective agencies and are subject to their terms of use. This site is an independent project, not affiliated with or endorsed by any of these agencies. For official forecasts and warnings, please refer to the agencies directly (in Taiwan, the CWA).
 

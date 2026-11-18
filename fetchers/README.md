@@ -389,3 +389,26 @@ workflow 目前仍只有手動觸發，沒有啟用 schedule。
 `publish` 模式仍可只發布指定資料。跨次使用明確 run ID 的 Actions artifact，保存天數
 由操作者必填，不自動 commit、不建立資料分支、不啟用排程。
 完整輸入、Secrets、失敗復原與尚待確認政策見 [manual-refresh-pages.md](../docs/manual-refresh-pages.md)。
+
+## 10. 熱帶系統官方路徑（`tropical_official`，2026-11-19 起在 `main`）
+
+西北太平洋熱帶系統專區的後端任務。它不是圖資產品：不在 `registered_products()`、`IMAGE_TYPES` 或 `REQUIRED` 內，
+不指定名稱時本機入口不會執行它。資料契約與設計決策見 [docs/tropical-cyclone/design.md](../docs/tropical-cyclone/design.md)。
+
+- **來源**：CWA `datastore/W-C0034-005`（需要 `CWA_API_KEY`）、JMA `extra.xml`／`targetTc.json`／VPTW60 電文（必要時加長期 feed）、JTWC RSS 與 `.tcw`。
+  每個來源固定 UA，同一來源請求間隔至少 1 秒，單次逾時 15 秒。
+- **輸出**：`<資料根>/tropical/official/index.json`，以及每個系統的 `tropical/official/storms/{cyclone_id}/analysis.json`、`forecast.json`。
+  先寫系統檔，最後寫索引；三個來源全部失敗時任務丟例外，舊檔保留。
+- **排程**：`policies/due-intervals.json` 的第 14 項，每 1800 秒檢查一次，失敗依 600／1200／2400／3600 秒重試，排在 13 項圖資之後。
+- **隔離**：在自己的 `http_scope()` 內執行，請求預算和 13 項分開；部署判定的「本輪嘗試全部失敗」規則排除 `tropical_` 任務；
+  任務失敗或寫出不合契約的檔時，`checked_update` 只還原 `tropical/official/` 前綴。
+- **清除**：只在 refresh 時，由 `snapshot_runner._prune_tropical` 刪除索引不再列出的系統檔；索引無效時不刪。報告欄位為 `pruned_tropical`。
+- **本機執行**：務必指定 `.runtime` 內的輸出位置，不帶 `--output-root` 會寫進 `frontend/public/data/`。
+
+```powershell
+.\.venv\Scripts\python.exe -B fetchers\update_images.py tropical_official --output-root .runtime\<資料夾>\images
+```
+
+- **停用**：從 `policies/due-intervals.json` 移除 `tropical_official`，並同步修改寫死任務清單的測試（如 `tests/test_scheduling.py`）。
+  這會讓排程狀態重置一次（所有任務在下一輪全部到期）。**不得**移除快照白名單或 `src/tropical_contract.py`：
+  已保存的快照含 `tropical/` 檔，沒有白名單的程式無法恢復它們。

@@ -4,6 +4,7 @@
 - 程式基準：`main`，commit `903c7caeaf1f49931ebe0463ae85e2a8887a69cb`，加上本批獨立接力控制器；此 SHA 是實作前基準。第 13 節描述程式行為，線上啟用與驗收結果另記本機 HANDOFF。
 - 依據：直接閱讀入口、Services、發布／快照、workflow 與前端程式；隔離真來源結果見第 8 節，先前手動雲端結果見本機 HANDOFF 第 14 節及本文第 11 節的界線摘要。
 - history v2 與先前來源／恢復修正維持不變。本批只實作接力入口、停止與去重保護，沒有改各圖資到期、歷史或保存政策（保存政策於 2026-11-10 另行調整，見第 4 節保存政策現況）。第 12 節保留先前 cron 直接入口紀錄；接力線上驗收須有真實 run 證據，不把模擬事件當作接力成功。
+- 2026-11-19：熱帶系統專區官方路徑（S7 里程碑）合併到 `main`（`05c6c7f`），新增第 14 項 due 任務 `tropical_official`，見第 14 節；第 1–13 節描述的既有 13 項流程沒有改變。
 - **維護要求：之後修改資料流、Fetcher、恢復／發布或前端讀取行為時，應同步更新本文件、盤點日期與程式基準。**
 
 HANDOFF.md 與本機 .runtime 驗收證據不納入版本控制；相關連結供本機維護使用。
@@ -121,6 +122,7 @@ flowchart TD
 | --- | --- | --- |
 | 公開 latest JSON | `frontend/public/data/images/{type}/latest.json` | 單圖或完整群組 metadata；瀏覽器讀取 |
 | 公開 history／daily／排行 | `frontend/public/data/images/{radar,satellite,rainfall}/history/YYYY-MM-DD.json`；`images/rainfall/daily/latest.json`；`rainfall/rankings/latest.json` | 已成功時次與缺口、每日三圖、整理後排行；不含私有排程狀態 |
+| 公開熱帶系統 JSON | `frontend/public/data/tropical/official/index.json`；`tropical/official/storms/{cyclone_id}/{analysis,forecast}.json` | 2026-11-19 起由 `tropical_official` 產生（第 14 節）；允許但非必要，不在 `REQUIRED` 內；進快照、封裝、網站，與圖資同一份 ZIP |
 | 本機進度與鎖 | `.runtime/updater/status.json`、`watch.lock`、`update.lock` | 防止同輸出重疊更新、顯示本機進度；自訂輸出目錄使用雜湊子目錄 |
 | 本機隔離快照 | `.runtime/snapshots/snapshots/{id}/data`、manifest、reports、current.json | update_snapshot 的可信候選與目前指標；不自動部署 |
 | 雲端輸入 | `$RUNNER_TEMP/pages-input/weather-snapshot.zip`、`source-result.json`、`source-state.json` | 恢復的 ZIP、來源 metadata、相容 state；Runner 暫存 |
@@ -354,3 +356,49 @@ GET 最多三次、每次 timeout 10 秒、退避 1／3 秒；401／403／壞文
 等待仍占用 runner，連續運作約額外 1,440 runner 分鐘／日及約一個併發名額，另加發布成本。控制器本身不被部署等待鎖住，但發布流程仍依既有整批鎖串行，忙碌可能使實際抓取間隔超過 10 分鐘；不承諾準點。busy 查詢與 POST 沒有原子交易，極短競爭仍可能形成一個 pending；原互斥與 admission 保護保留，不能宣稱完全不會與手動派發競爭。
 
 本節描述已實作行為與阻網測試；真 dispatch、開關操作、兩輪接力及線上逐檔 SHA 的結果，須以本機 HANDOFF 中有 run ID 的驗收紀錄為準。將新 workflow 推送至預設分支就可能啟動 cron，不能把推送當作與啟用無關的純文件動作；須先確認線上授權。後續線上驗收須分別記錄真正 cron／relay dispatch 的父子關係、開關等待中停止、busy 不追加、到期略過、state 累進、內容未變／新內容發布與資料對照。未自然發生的失敗或未變內容仍列待驗證。
+
+## 14. 熱帶系統官方路徑任務 `tropical_official`（2026-11-19 上線）
+
+設計與資料契約以 [docs/tropical-cyclone/design.md](tropical-cyclone/design.md) 為準（第 1、3、4、5 節）；本節只摘要它如何接進既有流程。
+
+### 來源與請求
+
+| 來源 | 請求 | 備註 |
+| --- | --- | --- |
+| CWA | `https://opendata.cwa.gov.tw/api/v1/rest/datastore/W-C0034-005`，每輪 1 次 | 金鑰以 `params` 傳入；無颱風時仍回傳最後一個已結束系統，以 15 小時過期門檻判斷不活躍 |
+| JMA | `extra.xml`、`targetTc.json` 各 1 次；VPTW60 電文每輪最多 12 則；必要時長期 feed `extra_l.xml` 1 次 | 以已保存的電文網址去重；`targetTc.json` 只作交叉檢查 |
+| JTWC | RSS 1 次；RSS 列出的每個相關系統 `.tcw` 各 1 次 | 新來源名稱 `jtwc`（`metoc.navy.mil`）；只請求符合固定樣式的產品網址，不抓 HTML |
+
+- 無系統時每輪 4 次請求，一個系統約 6–7 次。固定 UA `weather-integration-static/1.0 (tropical cyclone data fetcher)`；同來源間隔至少 1 秒；單次逾時 15 秒。
+- 任務在自己的 `http_scope()` 內執行：CWA、JMA、JTWC 的次數與時間窗從任務開始重新計算，不讀也不改 13 項的預算與 `blocked` 狀態。最壞情況（所有請求逾時）約增加 4.5–6 分鐘，仍在 build job 20 分鐘上限內，但與 13 項同時卡住時會逼近上限。
+
+### 接線
+
+- `policies/due-intervals.json` 第 14 項：1800 秒，重試 600／1200／2400／3600 秒，排在 13 項之後執行。
+- `snapshot_runner.belongs`：前綴 `tropical/official/`；`due_refresh` 的必存檔是 `tropical/official/index.json`，並跳過圖片雜湊重寫區塊。
+- `snapshots.allowed_path`／`validate_resource`：只多颱風路徑與 `tropical_contract.py` 驗證器（只丟 `ValueError`）；`REQUIRED` 不變。
+- `deployment_decision`：「本輪嘗試全部失敗」的判斷排除 `tropical_` 任務。颱風內容變更本身會觸發保存與部署（每次成功檢查都會更新 `last_ok_at` 心跳）。
+- 清除：只在 refresh，`_prune_tropical` 刪除索引不再列出的系統檔；報告欄位 `pruned_tropical`，不併入 `pruned_history`。
+- 前端：`/tropical` 由 `pages-build.mjs` 產生靜態入口、`verify_pages_build.py` 檢查；頁面以 lazy chunk 載入，首頁不讀颱風資料。
+
+### 失敗隔離
+
+- 單一來源失敗：索引標 `PARTIAL` 或該來源 `failed`，保留舊資料。三個來源全部失敗：任務丟例外，`checked_update` 還原整個 `tropical/official/` 前綴，進入重試；前端在必要來源 `last_ok_at` 超過 3 小時後顯示 STALE。
+- 合併前以同一份舊快照比對 `main` 與合併後程式：颱風任務丟例外、逾時、全部來源失敗、寫出無效索引時，13 項的檔案、檢查、排程、部署決策都相同（本機驗證，紀錄在 HANDOFF）。
+
+### 上線的一次性影響
+
+- 任務集合改變：舊的 13 項 scheduler-state 被 `validate_state` 拒絕並重置，第一輪 14 項全部到期，history 缺口重查次數歸零；舊 state artifact 不被 `cleanup` 主動刪除，7 天後到期。
+
+### 停用與回復
+
+- 停用任務：從 `due-intervals.json` 移除 `tropical_official`（同步修改寫死任務清單的測試）。會再重置一次排程；既有颱風檔留在快照中，前端顯示 STALE。
+- 隱藏頁面：移除 `App.jsx` 導覽連結與 `DashboardPage.jsx` 的專區連結，路由與資料保留。
+- **不得以還原白名單的方式停用**：已保存的快照含 `tropical/` 檔時，沒有白名單的程式無法恢復任何較新的快照。整個 revert 合併 commit 只在尚未保存任何含 `tropical/` 的快照時才可行。
+
+### 線上紀錄（2026-11-18 UTC，公開 API 與網站唯讀查得）
+
+- `main` 於 17:55:50Z 由 `495f155` 快轉至 `05c6c7f`。舊程式最後一輪 Relay 44362710365 正常交棒。
+- 新程式第一輪 Relay 44364571290 → Pages chain 44364634740：refresh 45 秒（之後各輪 1–20 秒），build 2 分 20 秒；weather_chart、850hpa（6 小時間隔）提早約 40 分鐘被檢查，間接顯示排程狀態重置（Summary 需登入，未直接讀到 `corrupt` 警告）；保存新快照並部署；`deployment.json` 為 `05c6c7f`／44364634740；`/tropical/` 由 404 變 200；颱風索引 `OK_NO_STORMS`，三個來源 `ok`。
+- 之後 Pages chain 44366536281（沒有任務到期，未部署；已成功恢復第一輪保存的新 state 與含 `tropical/` 的快照）、44368431035、44370335822（18:31Z 颱風任務再次執行並部署）皆成功，接力約每 10 分 15 秒交棒。
+- 尚未自然發生：有活躍系統時的線上資料、任一颱風來源失敗、颱風任務重試退避、build 接近時限。
