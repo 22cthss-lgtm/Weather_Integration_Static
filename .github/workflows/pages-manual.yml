@@ -63,10 +63,10 @@ jobs:
     outputs:
       allowed: ${{ steps.admit.outputs.allowed }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - name: Admit manual input or one enabled, traceable automatic request
@@ -99,11 +99,11 @@ jobs:
       data_artifact_id: ${{ steps.save_data.outputs.artifact-id || steps.resolve.outputs.snapshot_artifact_id }}
       state_artifact_id: ${{ steps.save_state.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -127,7 +127,7 @@ jobs:
         run: python -B fetchers/manage_snapshots.py guard
       - name: Read Pages metadata
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Automatically recover trusted data and scheduler state
         id: resolve
         if: env.SOURCE_MODE == 'auto'
@@ -148,7 +148,7 @@ jobs:
           python -B fetchers/refresh_pages.py source-run
       - name: Download snapshot from exact prior run
         if: env.SOURCE_MODE == 'explicit' && inputs.snapshot_run_id != ''
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: weather-snapshot
           path: ${{ runner.temp }}/pages-input
@@ -221,7 +221,7 @@ jobs:
       - name: Preserve validated public snapshot before deployment
         id: save_data
         if: steps.snapshot.outputs.save_snapshot == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: weather-snapshot
           path: ${{ runner.temp }}/pages-work/output/weather-snapshot.zip
@@ -236,7 +236,7 @@ jobs:
         run: python -B fetchers/manage_snapshots.py verify-data
       - name: Preserve safe scheduler state even when data is unchanged
         id: save_state
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: weather-scheduler-state
           path: ${{ runner.temp }}/pages-work/state/scheduler-state.json
@@ -252,7 +252,7 @@ jobs:
         run: python -B fetchers/manage_snapshots.py verify-state
       - name: Upload validated website only
         if: steps.snapshot.outputs.deploy == 'true'
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: frontend/dist
           retention-days: 1
@@ -273,8 +273,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - run: python -m pip install -r fetchers/requirements.txt
@@ -286,7 +286,7 @@ jobs:
           python -B fetchers/manage_snapshots.py guard
       - name: Deploy successfully validated artifact
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   cleanup:
     needs: [build, deploy]
@@ -297,8 +297,8 @@ jobs:
       contents: read
       actions: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - run: python -m pip install -r fetchers/requirements.txt
