@@ -5,6 +5,7 @@
 - 依據：直接閱讀入口、Services、發布／快照、workflow 與前端程式；隔離真來源結果見第 8 節，先前手動雲端結果見本機 HANDOFF 第 14 節及本文第 11 節的界線摘要。
 - history v2 與先前來源／恢復修正維持不變。本批只實作接力入口、停止與去重保護，沒有改各圖資到期、歷史或保存政策（保存政策於 2026-11-10 另行調整，見第 4 節保存政策現況）。第 12 節保留先前 cron 直接入口紀錄；接力線上驗收須有真實 run 證據，不把模擬事件當作接力成功。
 - 2026-11-19：熱帶系統專區官方路徑（S7 里程碑）合併到 `main`（`05c6c7f`），新增第 14 項 due 任務 `tropical_official`，見第 14 節；第 1–13 節描述的既有 13 項流程沒有改變。
+- S8 里程碑：確定性模式路徑的第 15 項 due 任務 `tropical_models`（`e294cc7`、`568fad1`）預定快轉進 `main`，見第 15 節；第 1–14 節的流程沒有改變。上線紀錄在上線後補記。
 - **維護要求：之後修改資料流、Fetcher、恢復／發布或前端讀取行為時，應同步更新本文件、盤點日期與程式基準。**
 
 HANDOFF.md 與本機 .runtime 驗收證據不納入版本控制；相關連結供本機維護使用。
@@ -123,6 +124,7 @@ flowchart TD
 | 公開 latest JSON | `frontend/public/data/images/{type}/latest.json` | 單圖或完整群組 metadata；瀏覽器讀取 |
 | 公開 history／daily／排行 | `frontend/public/data/images/{radar,satellite,rainfall}/history/YYYY-MM-DD.json`；`images/rainfall/daily/latest.json`；`rainfall/rankings/latest.json` | 已成功時次與缺口、每日三圖、整理後排行；不含私有排程狀態 |
 | 公開熱帶系統 JSON | `frontend/public/data/tropical/official/index.json`；`tropical/official/storms/{cyclone_id}/{analysis,forecast}.json` | 2026-11-19 起由 `tropical_official` 產生（第 14 節）；允許但非必要，不在 `REQUIRED` 內；進快照、封裝、網站，與圖資同一份 ZIP |
+| 公開數值模式路徑 JSON | `frontend/public/data/tropical/models/index.json`；`tropical/models/storms/{cyclone_id}/{cycle}.json`（精簡格式） | S8 起由 `tropical_models` 產生（第 15 節）；同上，允許但非必要 |
 | 本機進度與鎖 | `.runtime/updater/status.json`、`watch.lock`、`update.lock` | 防止同輸出重疊更新、顯示本機進度；自訂輸出目錄使用雜湊子目錄 |
 | 本機隔離快照 | `.runtime/snapshots/snapshots/{id}/data`、manifest、reports、current.json | update_snapshot 的可信候選與目前指標；不自動部署 |
 | 雲端輸入 | `$RUNNER_TEMP/pages-input/weather-snapshot.zip`、`source-result.json`、`source-state.json` | 恢復的 ZIP、來源 metadata、相容 state；Runner 暫存 |
@@ -402,3 +404,46 @@ GET 最多三次、每次 timeout 10 秒、退避 1／3 秒；401／403／壞文
 - 新程式第一輪 Relay 44364571290 → Pages chain 44364634740：refresh 45 秒（之後各輪 1–20 秒），build 2 分 20 秒；weather_chart、850hpa（6 小時間隔）提早約 40 分鐘被檢查，間接顯示排程狀態重置（Summary 需登入，未直接讀到 `corrupt` 警告）；保存新快照並部署；`deployment.json` 為 `05c6c7f`／44364634740；`/tropical/` 由 404 變 200；颱風索引 `OK_NO_STORMS`，三個來源 `ok`。
 - 之後 Pages chain 44366536281（沒有任務到期，未部署；已成功恢復第一輪保存的新 state 與含 `tropical/` 的快照）、44368431035、44370335822（18:31Z 颱風任務再次執行並部署）皆成功，接力約每 10 分 15 秒交棒。
 - 尚未自然發生：有活躍系統時的線上資料、任一颱風來源失敗、颱風任務重試退避、build 接近時限。
+
+## 15. 熱帶系統確定性模式路徑任務 `tropical_models`（S8 里程碑）
+
+設計與資料契約以 [docs/tropical-cyclone/design.md](tropical-cyclone/design.md) 為準（1.6、1.7、2.4、5.4–5.6、6.1、11e、11f）；本節只摘要它如何接進既有流程。
+
+### 來源與請求
+
+| 來源 | 請求 | 備註 |
+| --- | --- | --- |
+| NOAA NOMADS（`nomads.ncep.noaa.gov`，來源名稱 `noaa`） | 每個待補的 cycle：GFS `avno`、AIGFS `agfs` 的 ATCF tracker 檔各 1 次；tcvitals 每輪最多 1 次（只在有系統缺 JTWC 編號時） | 以已知檔名直接請求，不列目錄；403／404 在逾期前視為尚未發布 |
+| ECMWF open data（`data.ecmwf.int`，來源名稱 `ecmwf`） | 每個待補的 cycle：IFS、AIFS 確定性 tf BUFR 各 1 次 | 以 `pybufrkit`（`bitstring<4`）解碼，延遲匯入；執行時缺套件只讓 ECMWF 失敗 |
+
+- 先讀候選目錄內的官方索引：讀不到或無效時不請求、不改自己的檔（第一次執行時寫空索引）；沒有 `active` 系統時不請求，來源記為 `idle`。
+- 每個模式只處理最近 4 個 cycle，已記在 `checked` 的不再請求。平常每小時 0–4 次，新系統出現時最多約 17 次。同來源間隔至少 1 秒，單次逾時 15 秒。
+- 任務在自己的 `http_scope()` 內執行；`http_client` 的上限改成查表：`noaa` 200 次／420 秒、`ecmwf` 40 次／240 秒，`cwa`（600／240）與其他來源（80／90）不變。某來源出現 200／403／404 以外的結果後，本輪其餘請求略過。
+- 只有兩個來源都失敗時任務才算失敗（`AllSourcesFailed`，保留舊檔）。
+
+### 接線
+
+- `policies/due-intervals.json` 第 15 項：3600 秒，重試 1800／3600／7200／14400 秒，排在 `tropical_official` 之後。
+- `snapshot_runner.belongs`：前綴 `tropical/models/`；`snapshots.allowed_path`／`validate_resource` 新增兩種模式路徑與驗證器；`REQUIRED` 不變。
+- `publication.atomic_write_compact_json`：cycle 檔用精簡格式；`atomic_write_json` 的輸出不變。
+- 清除：`_prune_tropical` 依各前綴自己的索引刪除不再列出的檔，官方部分行為不變。
+- 大小上限：cycle 檔 24 KB、索引 16 KB、`tropical/models/` 前綴 512 KB。
+- 前端：只在 Forecast 分頁讀模式索引與最新 cycle 檔；建置開關 `VITE_TROPICAL_MODEL_LAYERS`（預設開啟，`off` 時不顯示、不請求）；四個模式圖層預設關閉。
+
+### 失敗隔離
+
+- 任務丟例外、逾時、兩個來源都失敗或寫出無效檔時，`checked_update` 只還原 `tropical/models/` 前綴，進入重試；合併前以同一份舊快照比對 `main` 與合併後程式，13 項的檔案、檢查、排程、部署決策都相同（本機驗證，紀錄在 HANDOFF）。
+- 已知例外：有活躍系統、而第一次執行兩個來源都失敗時，還沒有模式索引，前端 Forecast 分頁顯示「數值模式資料暫時無法取得」，直到重試成功；官方路徑不受影響。
+- 極端慢速（所有回應都傳不完）時，此任務最多約 11 分鐘（兩個來源的時間窗），與其他任務同時卡住時可能逼近 build job 的 20 分鐘上限。
+
+### 上線的一次性影響
+
+- 任務集合改變：排程狀態重置，第一輪 15 項全部到期。沒有活躍系統時 `tropical_models` 不發請求，只寫出來源為 `idle` 的索引。
+- 發布環境每輪安裝 `pybufrkit`（只有原始碼套件）。安裝失敗時 build 在 refresh 之前就失敗，13 項也不會更新；deploy、cleanup job 也會安裝。
+
+### 停用與回復
+
+- 只停前端：把 `frontend/src/tropical/features.js` 的預設改為關閉（同步修改預設開啟的測試）。後端照常產生資料。
+- 停後端：從 `due-intervals.json` 移除 `tropical_models`（同步修改 `test_scheduling.py`、`test_tropical_pipeline.py`），一律搭配停前端；既有模式檔留在快照中不再更新。會再重置一次排程。
+- `pybufrkit` 安裝失敗：只移除任務不夠，必須移除兩行相依套件並讓需要它的測試跳過（需改程式）。
+- **不得以還原白名單的方式停用**：第一輪起快照就含 `tropical/models/index.json`，沒有模式白名單的程式無法恢復它們，只能部分回復（保留白名單與驗證器）。

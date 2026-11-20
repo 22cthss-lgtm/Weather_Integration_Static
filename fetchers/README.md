@@ -412,3 +412,22 @@ workflow 目前仍只有手動觸發，沒有啟用 schedule。
 - **停用**：從 `policies/due-intervals.json` 移除 `tropical_official`，並同步修改寫死任務清單的測試（如 `tests/test_scheduling.py`）。
   這會讓排程狀態重置一次（所有任務在下一輪全部到期）。**不得**移除快照白名單或 `src/tropical_contract.py`：
   已保存的快照含 `tropical/` 檔，沒有白名單的程式無法恢復它們。
+
+## 11. 熱帶系統確定性模式路徑（`tropical_models`，S8 里程碑）
+
+讀官方索引後，為 `active` 的系統抓 NOAA GFS／AIGFS 的 ATCF tracker 與 ECMWF IFS／AIFS 的 tf BUFR，對到官方系統後寫出模式路徑。
+不是圖資產品，不指定名稱時本機入口不會執行它。資料契約見 [docs/tropical-cyclone/design.md](../docs/tropical-cyclone/design.md)（1.6、1.7、2.4、5.4、11e）。
+
+- **來源**：`nomads.ncep.noaa.gov`（`noaa`，200 次／420 秒）、`data.ecmwf.int`（`ecmwf`，40 次／240 秒）；固定 UA，同來源間隔至少 1 秒，單次逾時 15 秒。不需要 API Key。
+- **相依套件**：`requirements.txt` 的 `pybufrkit==0.2.25`、`bitstring>=3.1.9,<4`（bitstring 4 以上無法解碼）。沒裝時只有 ECMWF 失敗，但 `tests/test_tropical_models.py` 有 7 項會失敗。
+- **輸出**：`<資料根>/tropical/models/index.json`（縮排）與 `tropical/models/storms/{cyclone_id}/{cycle}.json`（精簡格式）。先寫 cycle 檔，最後寫索引；兩個來源都失敗時丟 `AllSourcesFailed`，舊檔保留。
+- **排程**：`policies/due-intervals.json` 第 15 項，每 3600 秒，失敗依 1800／3600／7200／14400 秒重試，排在 `tropical_official` 之後。
+- **清除**：`snapshot_runner._prune_tropical` 依模式索引刪除不再列出的 cycle 檔；索引無效時不刪。
+- **本機執行**：務必指定 `.runtime` 內的輸出位置；需要該位置已有官方索引，否則只寫空索引。
+
+```powershell
+.\.venv\Scripts\python.exe -B fetchers\update_images.py tropical_models --output-root .runtime\<資料夾>\images
+```
+
+- **停用**：從 `policies/due-intervals.json` 移除 `tropical_models`，同步修改 `tests/test_scheduling.py`、`tests/test_tropical_pipeline.py`，並把前端 `src/tropical/features.js` 的預設改為關閉。
+  **不得**移除快照白名單或 `src/tropical_contract.py` 的模式驗證器。
