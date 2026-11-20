@@ -261,12 +261,15 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.elapsed, 600)
         self.assertIn(('cadence_wait_seconds', 300.0), self.messages)
 
-    def test_incomplete_query_stops_before_post(self):
+    def test_persistently_incomplete_query_never_posts(self):
+        # Since 2026-11-20 the busy check skips the update instead of stopping, but
+        # the hand-off's own duplicate check still refuses to POST blind and stops.
         self.api.incomplete = True
         with self.assertRaisesRegex(chain.RelayError, 'incomplete_run_query'):
             self.controller.relay()
         self.assertFalse(self.api.posts)
-        self.assertEqual(self.elapsed, sum(chain.LISTING_RETRY_DELAYS))
+        self.assertIn('publisher state unknown', dict(self.messages)['update'])
+        self.assertEqual(self.elapsed, 600 + sum(chain.LISTING_RETRY_DELAYS))
 
     def test_transiently_inconsistent_listing_is_reread_then_used(self):
         # Run #49 (2026-11-06): one listing reported total_count != rows and the
@@ -717,6 +720,240 @@ class UnconfirmedDispatchTests(unittest.TestCase):
         with self.assertRaisesRegex(chain.RelayError, 'api_http_403'):
             self.controller.relay()
         self.assertEqual(len(self.relay_posts()), 0)
+
+
+class TransientPublisherStateTests(unittest.TestCase):
+    """Relay 44631504533 (2026-11-19 22:45Z): the first busy listing kept reporting a
+    total_count that disagreed with its rows, the relay stopped with
+    incomplete_run_query and nothing ran until the 01:15Z cron seed (~2.5 h)."""
+    setUp = ControllerTests.setUp
+    sleep = ControllerTests.sleep
+    pages_posts = UnconfirmedDispatchTests.pages_posts
+    relay_posts = UnconfirmedDispatchTests.relay_posts
+    keys = UnconfirmedDispatchTests.keys
+
+    def next_round(self):
+        # A skipped round's only POST is the hand-off, so the next relay is run 101.
+        self.assertEqual(next(r for r in self.api.rows if r['id'] == 101)['display_title'], 'Relay r10a1')
+        self.env.update(GITHUB_RUN_ID='101', GITHUB_EVENT_NAME='workflow_dispatch', RELAY_REQUEST_ID='r10a1')
+        self.messages.clear()
+        self.elapsed = 0
+
+    STATUS = 'status='
+    RECENT = 'created=%3E%3D2026-11-05T23%3A50'   # relay() recent listing (now - 600 s)
+    MATCH = 'created=%3E%3D2026-11-06T00%3A00'    # dispatch() duplicate check (since run start)
+
+    def fail(self, marker, kind='inconsistent', workflow=chain.PUBLISH, reads=None, after=0):
+        """Break listings of `workflow` whose query contains `marker`.
+
+        reads: how many matching reads fail (None = all); after: only from this elapsed time."""
+        original = self.api.request
+        state = dict(left=reads, seen=[])
+        def broken(method, path, payload=None):
+            listing = path.startswith('/actions/workflows/' + workflow + '/runs?') and marker in path
+            if not listing or self.elapsed < after or state['left'] == 0:
+                return original(method, path, payload)
+            if state['left'] is not None:
+                state['left'] -= 1
+            state['seen'].append(self.elapsed)
+            if kind == 'transport':
+                raise chain.RelayError('api_transport_or_retry_exhausted')
+            if kind == 'forbidden':
+                raise chain.RelayError('api_http_403')
+            result = original(method, path, payload)
+            if kind == 'inconsistent':
+                result['total_count'] += 1
+            elif kind == 'overflow':
+                result['total_count'] = 101
+            elif kind == 'invalid':
+                result['workflow_runs'] = result['workflow_runs'] + [dict(id='bad')]
+                result['total_count'] = len(result['workflow_runs'])
+            return result
+        self.api.request = broken
+        return state['seen']
+
+    def with_recent_auto_run(self):
+        self.api.rows.append(record(79, chain.PUBLISH, 'Pages chain u9a1'))
+        self.api.rows[-1]['created_at'] = '2026-11-05T23:55:00+00:00'
+
+    def assert_skipped_and_handed_off(self, error='incomplete_run_query'):
+        self.assertEqual(self.pages_posts(), [])
+        self.assertEqual(len(self.relay_posts()), 1)
+        self.assertEqual(self.relay_posts()[0][1]['inputs'], {'relay_request_id': 'r10a1'})
+        updates = [v for k, v in self.messages if k == 'update']
+        self.assertEqual(len(updates), 1)
+        self.assertIn('publisher state unknown (' + error + ')', updates[0])
+        self.assertNotIn('update_run', self.keys())
+        self.assertNotIn('update_unconfirmed', self.keys())
+        self.assertIn('next_relay', self.keys())
+        self.assertEqual(self.elapsed, 600)          # Normal cadence, no early hand-off.
+
+    def test_incident_inconsistent_busy_listing_on_every_attempt(self):
+        # Exactly the incident: all three reads of the first busy listing disagree.
+        seen = self.fail(self.STATUS, reads=len(chain.LISTING_RETRY_DELAYS) + 1)
+        self.controller.relay()
+        self.assertEqual(seen, [0, 2, 6])            # Bounded re-reads still happen first.
+        self.assert_skipped_and_handed_off()
+        listing_calls = [p for m, p in self.api.calls if chain.PUBLISH + '/runs?' in p]
+        self.assertEqual(len(listing_calls), 3)      # No recent listing, no Pages preflight.
+
+    def test_incident_cli_exits_zero_and_hands_off(self):
+        self.fail(self.STATUS, reads=3)
+        with patch.dict(os.environ, dict(GITHUB_REPOSITORY='owner/repo'), clear=True), \
+             patch.object(chain, 'GitHub', return_value=self.api), \
+             patch.object(chain, 'Controller', side_effect=lambda api, env: self.controller), \
+             patch.object(chain, 'summary') as output:
+            self.assertEqual(chain.main(['relay']), 0)
+        self.assertNotIn('safe_stop', [c.args[0] for c in output.call_args_list])
+        self.assert_skipped_and_handed_off()
+
+    def test_transport_failure_on_later_busy_status_is_skipped(self):
+        original = self.api.request
+        def flaky(method, path, payload=None):
+            if 'status=pending' in path:
+                raise chain.RelayError('api_transport_or_retry_exhausted')
+            return original(method, path, payload)
+        self.api.request = flaky
+        self.api.rows.append(record(77, chain.PUBLISH, status='queued'))  # Seen before the failure.
+        self.controller.relay()
+        self.assert_skipped_and_handed_off('api_transport_or_retry_exhausted')
+        self.assertNotIn('busy', self.keys())        # Partial busy results are not reported as complete.
+
+    def test_recent_listing_transient_is_skipped(self):
+        self.fail(self.RECENT)
+        self.controller.relay()
+        self.assert_skipped_and_handed_off()
+
+    def test_post_cadence_recheck_transient_is_skipped(self):
+        self.with_recent_auto_run()
+        self.fail(self.STATUS, kind='transport', after=1)   # Only after the 300 s wait began.
+        self.controller.relay()
+        self.assertIn(('cadence_wait_seconds', 300.0), self.messages)
+        self.assert_skipped_and_handed_off('api_transport_or_retry_exhausted')
+
+    def test_post_cadence_recheck_inconsistent_on_every_attempt_is_skipped(self):
+        self.with_recent_auto_run()
+        seen = self.fail(self.STATUS, after=1, reads=3)
+        self.controller.relay()
+        self.assertEqual(seen, [300, 302, 306])
+        self.assert_skipped_and_handed_off()
+
+    def test_dispatch_duplicate_check_transient_is_skipped(self):
+        self.fail(self.MATCH, workflow=chain.PUBLISH)
+        self.controller.relay()
+        self.assert_skipped_and_handed_off()
+
+    def test_dispatch_busy_preflight_transient_is_skipped(self):
+        # First busy check passes; the dispatch preflight busy read (2nd round of status reads) fails.
+        reads = []
+        original = self.api.request
+        def flaky(method, path, payload=None):
+            if chain.PUBLISH + '/runs?' in path and self.STATUS in path:
+                reads.append(path)
+                if len(reads) > len(chain.ACTIVE):
+                    raise chain.RelayError('api_transport_or_retry_exhausted')
+            return original(method, path, payload)
+        self.api.request = flaky
+        self.controller.relay()
+        self.assertEqual(len(reads), len(chain.ACTIVE) + 1)
+        self.assert_skipped_and_handed_off('api_transport_or_retry_exhausted')
+
+    def test_state_unknown_is_raised_only_before_pages_post(self):
+        self.fail(self.MATCH, kind='transport', workflow=chain.PUBLISH)
+        with self.assertRaisesRegex(chain.StateUnknown, 'api_transport_or_retry_exhausted'):
+            self.controller.dispatch(chain.PUBLISH, {}, 'Pages chain u10a1', NOW)
+        self.assertFalse(self.api.posts)
+
+    def test_reads_after_pages_post_keep_existing_behaviour(self):
+        # Transient listing misses after the POST are reconcile misses, not "state unknown".
+        self.api.hidden_ids = {101}
+        self.controller.relay()
+        self.assertEqual(len(self.pages_posts()), 1)
+        self.assertIn('update_unconfirmed', self.keys())
+        self.assertNotIn('publisher state unknown', str(self.messages))
+
+    def test_hand_off_preflight_transient_still_stops_visibly(self):
+        # Not widened: the hand-off keeps its existing stop on a failed duplicate check.
+        self.fail(self.MATCH, workflow=chain.RELAY)
+        with self.assertRaises(chain.RelayError) as caught:
+            self.controller.relay()
+        self.assertNotIsInstance(caught.exception, chain.StateUnknown)
+        self.assertEqual(str(caught.exception), 'incomplete_run_query')
+        self.assertEqual(len(self.pages_posts()), 1)
+        self.assertEqual(self.relay_posts(), [])
+
+    def test_too_many_runs_still_stops_everywhere(self):
+        for marker, after in ((self.STATUS, 0), (self.RECENT, 0), (self.MATCH, 0), (self.STATUS, 1)):
+            with self.subTest(marker=marker, after=after):
+                self.setUp()
+                if after:
+                    self.with_recent_auto_run()
+                self.fail(marker, kind='overflow', after=after)
+                with self.assertRaises(chain.TooManyRuns):
+                    self.controller.relay()
+                self.assertFalse(self.api.posts)
+                self.assertNotIn('next_relay', self.keys())
+                self.assertNotIn('publisher state unknown', str(self.messages))
+
+    def test_non_transient_errors_still_stop_everywhere(self):
+        for kind, error in (('forbidden', 'api_http_403'), ('invalid', 'invalid_run_record')):
+            for marker, after in ((self.STATUS, 0), (self.RECENT, 0), (self.MATCH, 0), (self.STATUS, 1)):
+                with self.subTest(kind=kind, marker=marker, after=after):
+                    self.setUp()
+                    if after:
+                        self.with_recent_auto_run()
+                    self.fail(marker, kind=kind, after=after)
+                    with self.assertRaisesRegex(chain.RelayError, error):
+                        self.controller.relay()
+                    self.assertFalse(self.api.posts)
+                    self.assertNotIn('publisher state unknown', str(self.messages))
+
+    def test_controller_switch_read_failure_still_fails_closed(self):
+        self.fail(self.STATUS, reads=3)
+        original = self.api.request
+        def switch(method, path, payload=None):
+            if path == '/actions/workflows/' + chain.RELAY and self.elapsed >= 300:
+                raise chain.RelayError('api_transport_or_retry_exhausted')
+            return original(method, path, payload)
+        self.api.request = switch
+        with self.assertRaisesRegex(chain.RelayError, 'api_transport_or_retry_exhausted'):
+            self.controller.relay()
+        self.assertFalse(self.api.posts)
+
+    def test_disable_during_skipped_round_still_stops(self):
+        self.fail(self.STATUS, reads=3)
+        def stop(seconds):
+            self.sleep(seconds)
+            if self.elapsed >= 100:
+                self.api.active = False
+        self.controller.sleep = stop
+        with self.assertRaises(chain.Stopped):
+            self.controller.relay()
+        self.assertFalse(self.api.posts)
+
+    def test_next_relay_recovers_with_one_normal_update(self):
+        self.fail(self.STATUS, reads=3)
+        self.controller.relay()
+        self.assert_skipped_and_handed_off()
+        self.next_round()
+        self.controller.relay()
+        self.assertEqual(len(self.pages_posts()), 1)   # One update, no catch-up burst.
+        self.assertEqual(self.pages_posts()[0][1]['inputs']['chain_request_id'], 'u101a1')
+        self.assertEqual(len(self.relay_posts()), 2)
+        self.assertEqual(self.relay_posts()[1][1]['inputs'], {'relay_request_id': 'r101a1'})
+        self.assertNotIn('cadence_wait_seconds', self.keys())  # Nothing was dispatched last round.
+        self.assertNotIn('publisher state unknown', str(self.messages))
+        self.assertEqual(self.elapsed, 600)
+
+    def test_next_relay_still_respects_busy_and_cadence_after_skip(self):
+        self.fail(self.STATUS, reads=3)
+        self.controller.relay()
+        self.next_round()
+        self.api.rows.append(record(90, chain.PUBLISH, 'manual', 'in_progress'))
+        self.controller.relay()
+        self.assertEqual(self.pages_posts(), [])
+        self.assertIn('busy', self.keys())
+        self.assertEqual(len(self.relay_posts()), 2)
 
 
 class TransportTests(unittest.TestCase):

@@ -56,6 +56,15 @@ class TooManyRuns(RelayError):
         super().__init__('incomplete_run_query')
 
 
+class StateUnknown(RelayError):
+    """A publisher-state read before the Pages POST failed transiently; nothing was sent."""
+
+
+def transient(error):
+    """True for read failures that may clear later; never for TooManyRuns."""
+    return not isinstance(error, TooManyRuns) and str(error) in TRANSIENT_READ_ERRORS
+
+
 class Unconfirmed(RelayError):
     """The sole POST was sent (or its result is unknown) but no run was confirmed."""
     def __init__(self, post_accepted):
@@ -189,16 +198,26 @@ class Controller:
             raise RelayError('untrusted_matching_run')
         return matches
 
+    def active_publishers(self):
+        return [row for status in ACTIVE for row in self.runs(PUBLISH, status=status)]
+
     def dispatch(self, workflow, inputs, title, since):
         self.enabled()
-        matches = self.matching(workflow, title, since)
+        try:
+            matches = self.matching(workflow, title, since)
+            busy = self.active_publishers() if workflow == PUBLISH and not matches else []
+        except RelayError as error:
+            # Pre-POST publisher reads only: nothing was sent, so skipping is safe.
+            # The hand-off (RELAY) keeps failing visibly; see docs/data-flow.md section 13.
+            if workflow != PUBLISH or not transient(error):
+                raise
+            raise StateUnknown(str(error)) from None
         if len(matches) > 1:
             raise RelayError('ambiguous_dispatch_identity')
         if matches:
             self.report('dispatch_reused', matches[0]['id'])
             return matches[0]
         if workflow == PUBLISH:
-            busy = [row for status in ACTIVE for row in self.runs(PUBLISH, status=status)]
             if busy:
                 raise Busy(', '.join(str(row['id']) + ':' + row['status'] for row in busy))
         self.enabled()  # Live read immediately before the sole POST.
@@ -236,7 +255,7 @@ class Controller:
                 run = self.validate_run(self.api.request('GET', '/actions/runs/' + str(run_id)), workflow)
             except RelayError as error:
                 # A just-created run may briefly 404 by ID; treat like a listing miss.
-                if isinstance(error, TooManyRuns) or str(error) not in (*TRANSIENT_READ_ERRORS, 'api_http_404'):
+                if not transient(error) and str(error) != 'api_http_404':
                     raise
                 run = None
             if run is not None:
@@ -250,7 +269,7 @@ class Controller:
         try:
             matches = self.matching(workflow, title, since)
         except RelayError as error:
-            if isinstance(error, TooManyRuns) or str(error) not in TRANSIENT_READ_ERRORS:
+            if not transient(error):
                 raise
             return None
         if len(matches) > 1 or (matches and run_id is not None and matches[0]['id'] != run_id):
@@ -306,6 +325,10 @@ class Controller:
         self.report('chain_request', request_id)
         return True
 
+    def state_unknown(self, error):
+        self.report('update', 'not dispatched; publisher state unknown (' + str(error) +
+                    '); no retry or catch-up this round; publisher lock/queue remains untouched')
+
     def relay(self):
         started = self.clock()
         self.context()
@@ -333,15 +356,23 @@ class Controller:
                     or parent.get('event') not in ('schedule', 'workflow_dispatch')):
                 raise RelayError('invalid_relay_parent')
         self.report('relay_parent_request', parent_request or 'cron/manual seed')
-        busy = []
-        for status in ACTIVE:
-            busy.extend(self.runs(PUBLISH, status=status))
         child = None
+        # Relay 44631504533 (2026-11-19): an inconsistent busy listing stopped the
+        # chain for ~2.5 h. A transient publisher-state read now skips this round's
+        # update (never dispatching blind) but still waits and hands off.
+        try:
+            busy = self.active_publishers()
+            recent = None if busy else self.runs(
+                PUBLISH, created='>=' + (self.now() - timedelta(seconds=600)).isoformat())
+        except RelayError as error:
+            if not transient(error):
+                raise
+            busy = recent = None
+            self.state_unknown(error)
         if busy:
             self.report('busy', ', '.join(str(row['id']) + ':' + row['status'] for row in busy))
             self.report('update', 'not dispatched; publisher lock/queue remains untouched')
-        else:
-            recent = self.runs(PUBLISH, created='>=' + (self.now() - timedelta(seconds=600)).isoformat())
+        elif recent is not None:
             automatic = [row for row in recent if row['display_title'].startswith('Pages chain ')]
             if automatic:
                 last = max(automatic, key=lambda row: timestamp(row['created_at']))
@@ -351,10 +382,16 @@ class Controller:
                 self.report('cadence_wait_seconds', round(remaining, 1))
                 self.wait_until(self.clock() + remaining)
                 # Work may have started while waiting. Do not enqueue behind it.
-                busy = [row for status in ACTIVE for row in self.runs(PUBLISH, status=status)]
+                try:
+                    busy = self.active_publishers()
+                except RelayError as error:
+                    if not transient(error):
+                        raise
+                    busy = None
+                    self.state_unknown(error)
             if busy:
                 self.report('busy', ', '.join(str(row['id']) + ':' + row['status'] for row in busy))
-            else:
+            elif busy is not None:
                 request_id = 'u' + identifier + 'a' + attempt
                 try:
                     child = self.dispatch(PUBLISH, dict(snapshot_source='auto', mode='refresh',
@@ -362,6 +399,8 @@ class Controller:
                         'Pages chain ' + request_id, timestamp(current['created_at']))
                 except Busy as error:
                     self.report('busy', str(error) + '; changed during preflight, no update dispatched')
+                except StateUnknown as error:
+                    self.state_unknown(error)
                 except Unconfirmed as error:
                     # Never resend. If the run exists, the next relay sees it as busy or
                     # recent; publisher admission still rejects an earlier same-ID run.
