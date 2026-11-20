@@ -141,11 +141,20 @@ def summary(key, value):
             output.write(line)
 
 
+def warning(message):
+    """GitHub Actions warning annotation: the run stays green but is flagged yellow.
+
+    The fixed title must not contain ':' or ',' (property values would need escaping)."""
+    text = str(message).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+    print('::warning title=Relay update skipped::' + text, flush=True)
+
+
 class Controller:
     def __init__(self, api, env, *, clock=time.monotonic, sleep=time.sleep,
-                 now=lambda: datetime.now(timezone.utc), report=summary):
+                 now=lambda: datetime.now(timezone.utc), report=summary, warn=warning):
         self.api, self.env = api, env
         self.clock, self.sleep, self.now, self.report = clock, sleep, now, report
+        self.warn = warn
 
     def enabled(self):
         metadata = self.api.request('GET', '/actions/workflows/' + RELAY)
@@ -328,6 +337,9 @@ class Controller:
     def state_unknown(self, error):
         self.report('update', 'not dispatched; publisher state unknown (' + str(error) +
                     '); no retry or catch-up this round; publisher lock/queue remains untouched')
+        # A green run that never publishes is otherwise easy to miss.
+        self.warn('Publisher state unknown (' + str(error) + '); no Pages update dispatched '
+                  'this round, relay handed off. Repeated warnings mean the listing is not recovering.')
 
     def relay(self):
         started = self.clock()

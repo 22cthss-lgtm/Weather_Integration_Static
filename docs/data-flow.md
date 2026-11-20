@@ -339,7 +339,7 @@ latest 先獨立驗證／原子發布，history pending、缺圖或寫入失敗�
 
 2026-11-20 起（Relay 44631504533，11/19 22:45Z：入口第一個 busy 查詢的 `total_count` 在 2／4 秒重讀後仍與筆數不符，報 `incomplete_run_query` 停止，沒有交棒，直到 01:15Z cron seed 才接回，約 2.5 小時沒有發布）：
 - **發布 POST 之前**的發布狀態讀取，即入口 busy 查詢、600 秒內最近自動派發查詢、cadence 等待後的 busy 重查，以及派發發布前的同識別碼查詢與 busy 查詢，若遇上述暫時性錯誤（`api_transport_or_retry_exhausted`，含 429／5xx 重試用完；或 `incomplete_run_query`，即重讀後仍不一致，或清單文件格式不符，後者不重讀，與 POST 後查證的判定相同），本輪**不派發發布**，回報 `update: not dispatched; publisher state unknown (<錯誤>)…`。狀態不明時不盲目派發，本輪不重試、不補派；照常等到 600 秒並發出下一個 relay，由下一輪重新判斷 busy 與 cadence（每輪最多一次發布，不追趕）。部分 busy 結果不當作完整結果回報。
-- 超過 100 筆（`TooManyRuns`）、壞紀錄、429／5xx 以外的 HTTP 錯誤（例如 401／403／404）等非暫時性錯誤照舊停止。暫時性錯誤若一直不消失，每輪都是綠色但不發布，只能從 summary 的 `publisher state unknown` 看出。控制器開關讀取（`enabled()`）失敗照舊停止（無法確認就停止）；發布 POST 之後的查證規則不變。
+- 超過 100 筆（`TooManyRuns`）、壞紀錄、429／5xx 以外的 HTTP 錯誤（例如 401／403／404）等非暫時性錯誤照舊停止。暫時性錯誤跳過發布時，每次另印一則 GitHub Actions `::warning::` 標註（標題 `Relay update skipped`），run 仍是綠色（exit 0），但 run 頁面的 Annotations 會顯示黃色警告；暫時性錯誤若一直不消失，就會每輪都出現這則警告而不發布。控制器開關讀取（`enabled()`）失敗照舊停止（無法確認就停止）；發布 POST 之後的查證規則不變。
 - **下一 relay 的派發前同識別碼查詢沒有放寬**：遇暫時性錯誤仍以代碼 1 停止，不 POST，需等 cron 恢復（重試這段需另行設計，列為待辦）。發布 admission 也不變。
 
 發布 admission 在原整批鎖內執行：核對 parent workflow／ID／attempt／branch、目前 run 是否出現在完整查詢，已有更早同識別碼 run 則略過 build。剛啟動的 run 可能暫時不在篩選列表中（線上 Pages chain #550 因此停止），2026-11-10 起最多再讀 4 次（間隔 2／4／8／15 秒，約 29 秒，每次間隔重讀開關），仍查不到才報 `current_run_not_in_complete_query`；遲到出現的較早同識別碼 run 仍判為重複而略過。自動請求不允許 rerun 重做抓取，需由新控制器產生新識別碼。普通手動輸入不需控制器或 token 即可通過 admission，原發布校驗照常執行。

@@ -98,12 +98,14 @@ class ControllerTests(unittest.TestCase):
         self.api = FakeAPI()
         self.elapsed = 0
         self.messages = []
+        self.warnings = []
         self.env = dict(GITHUB_REPOSITORY='owner/repo', DEFAULT_BRANCH='main',
                         GITHUB_REF='refs/heads/main', GITHUB_RUN_ID='10',
                         GITHUB_RUN_ATTEMPT='1', GITHUB_EVENT_NAME='schedule',
                         CHAIN_REQUEST_ID='', RELAY_REQUEST_ID='')
         self.controller = chain.Controller(self.api, self.env, clock=lambda: self.elapsed,
-            sleep=self.sleep, now=lambda: NOW, report=lambda k, v: self.messages.append((k, v)))
+            sleep=self.sleep, now=lambda: NOW, report=lambda k, v: self.messages.append((k, v)),
+            warn=self.warnings.append)
 
     def sleep(self, seconds):
         self.assertLessEqual(seconds, 20)
@@ -787,6 +789,8 @@ class TransientPublisherStateTests(unittest.TestCase):
         self.assertNotIn('update_unconfirmed', self.keys())
         self.assertIn('next_relay', self.keys())
         self.assertEqual(self.elapsed, 600)          # Normal cadence, no early hand-off.
+        self.assertEqual(len(self.warnings), 1)      # One yellow annotation per skipped round.
+        self.assertIn('Publisher state unknown (' + error + ')', self.warnings[0])
 
     def test_incident_inconsistent_busy_listing_on_every_attempt(self):
         # Exactly the incident: all three reads of the first busy listing disagree.
@@ -894,6 +898,7 @@ class TransientPublisherStateTests(unittest.TestCase):
                 self.assertFalse(self.api.posts)
                 self.assertNotIn('next_relay', self.keys())
                 self.assertNotIn('publisher state unknown', str(self.messages))
+                self.assertEqual(self.warnings, [])
 
     def test_non_transient_errors_still_stop_everywhere(self):
         for kind, error in (('forbidden', 'api_http_403'), ('invalid', 'invalid_run_record')):
@@ -907,6 +912,7 @@ class TransientPublisherStateTests(unittest.TestCase):
                         self.controller.relay()
                     self.assertFalse(self.api.posts)
                     self.assertNotIn('publisher state unknown', str(self.messages))
+                    self.assertEqual(self.warnings, [])
 
     def test_controller_switch_read_failure_still_fails_closed(self):
         self.fail(self.STATUS, reads=3)
@@ -943,7 +949,38 @@ class TransientPublisherStateTests(unittest.TestCase):
         self.assertEqual(self.relay_posts()[1][1]['inputs'], {'relay_request_id': 'r101a1'})
         self.assertNotIn('cadence_wait_seconds', self.keys())  # Nothing was dispatched last round.
         self.assertNotIn('publisher state unknown', str(self.messages))
+        self.assertEqual(len(self.warnings), 1)                # Only the skipped round warned.
         self.assertEqual(self.elapsed, 600)
+
+    def test_normal_busy_and_unconfirmed_rounds_do_not_warn(self):
+        for setup in (lambda: None,
+                      lambda: self.api.rows.append(record(77, chain.PUBLISH, status='queued')),
+                      lambda: self.api.hidden_ids.add(101)):
+            with self.subTest(setup=setup):
+                self.setUp()
+                setup()
+                self.controller.relay()
+                self.assertEqual(self.warnings, [])
+                self.assertIn('next_relay', self.keys())
+
+    def test_warning_annotation_format_is_escaped(self):
+        with patch('builtins.print') as output:
+            chain.warning('state unknown (incomplete_run_query)\n100% skipped\r')
+        output.assert_called_once_with('::warning title=Relay update skipped::state unknown '
+                                       '(incomplete_run_query)%0A100%25 skipped%0D', flush=True)
+
+    def test_default_controller_prints_warning_annotation(self):
+        controller = chain.Controller(self.api, self.env, clock=lambda: self.elapsed, sleep=self.sleep,
+                                      now=lambda: NOW, report=lambda k, v: None)
+        self.controller = controller
+        self.fail(self.STATUS, reads=3)
+        with patch('builtins.print') as output:
+            controller.relay()
+        lines = [c.args[0] for c in output.call_args_list if str(c.args[0]).startswith('::warning')]
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith('::warning title=Relay update skipped::Publisher state unknown '
+                                            '(incomplete_run_query); no Pages update dispatched'))
+        self.assertNotIn('\n', lines[0])
 
     def test_next_relay_still_respects_busy_and_cadence_after_skip(self):
         self.fail(self.STATUS, reads=3)
